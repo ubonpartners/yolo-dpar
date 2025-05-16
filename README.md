@@ -109,8 +109,8 @@ In my opinion (B) is the better option. However note that the modified ultralyti
 
 ### License
 
-This work, including the weights is dual-licensed under <b>AGPL</b>, for <b> noncommercial use only</b>, and under the <b>Ubon cooperative license</b>..
-
+This work, is dual-licensed under <b>AGPL</b>, for <b> noncommercial use only</b>, and under the <b>Ubon cooperative license</b>..
+The weights were trained using code derived from ultralytics and as such are subject to AGPL and conditions as specified by ultralytics.
 Additional restrictions may be imposed by licenses of the datasets on which these models were trained.
 
 Please contact [me](mailto:bernandocribbenza@gmail.com?subject=yolo-dpa%20question&body=Your-code-is-rubbish!) if any questions.
