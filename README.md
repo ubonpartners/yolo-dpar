@@ -51,6 +51,7 @@ The ReID results are measured top-1 and top-10 recall on a mixed set containing 
 
 <b>Yolo11-dpa-x, yolo12-dpa-l, yolo11-dpar-l -weights</b> - exist, but I have not uploaded or updated the table yet, all this takes some time!
 
+<div style="overflow-x: auto;">
 <small>
   
 | Model | size<br><sup>(pixels)  | params<br><sup>(M) | mAP50 Person | mAP50 Face  | mAP50 Vehicle | mAP50 Pose | mAP50 Face KP | mAP50 Attr <br>(Main) | mAP50 Attr <br>(colour) |REID recall@K 1 , 10|
@@ -68,6 +69,7 @@ The ReID results are measured top-1 and top-10 recall on a mixed set containing 
 |yolo11-n     | 640 | 2.6  | 0.758 |       | 0.678 |       |       |       |       | |
 
 </small>
+</div>
 
 ---
 
