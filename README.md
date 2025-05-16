@@ -1,4 +1,4 @@
-# yolo-dpa : Yolo12 + Simultaneous Detection, Pose, Attributes
+# yolo-dpar : Yolo11/12 + Simultaneous Detection, Pose, Attributes, ReID
 Contents: [Introduction](#introduction) | [Test Results](#test-results) | [Usage](#usage) | [License](#license)
 
 ---
@@ -16,7 +16,7 @@ Contents: [Introduction](#introduction) | [Test Results](#test-results) | [Usage
   </tr>
 </table>
 
-<b>Yolo-DPA</b> is a set of proof of concept models derived from Ultralytics yolo11 to investigate the performance of combining <b>object detection</b>, <b>pose/keypoint detection</b> and <b>binary attribute detection</b> together into a single model, done in one pass. Remarkably, adding all the extra capabilities does not seem to make the model too much worse at the basic object detection versus the original object detection only model, with only a  tiny increase in parameter/flop count.
+<b>Yolo-DPAR</b> is a set of proof of concept models derived from Ultralytics yolo11 to investigate the performance of combining object detection, pose/keypoint detection, binary attribute detection and ReID embeddings together into a single model, done in one pass. Remarkably, adding all the extra capabilities does not seem to make the model too much worse at the basic object detection versus the original object detection only model, with only a tiny increase in parameter/flop count. Yolo-DPA and Yolo-DP refer to reduced models with the ReID and the ReID+Attributes capabilites ommited respectively.
 
 It was also intended to test the [dataset processing pipeline](https://github.com/ubonpartners/dataset_processor) which attempts things like automatic labelling, combining multiple datasets together, and using vision-LLMs
 
@@ -26,12 +26,14 @@ These models and technologies are intended as a proof of concept only. Please ch
 - Ultralytics Yolo11/12 (slightly) modified for multi-label detection support (https://github.com/ubonpartners/ultralytics/tree/mdb)
 - DatasetProcessor (https://github.com/ubonpartners/dataset_processor)
 - AzureML (https://github.com/ubonpartners/azureml)
+- REID tools (https://github.com/ubonparterns/reid) - repository for training the REID adapter network and producing the fused model
 
 #### Test models (weights provided) has
 - <b>Detection</b> of 5 basic classes *Person, Face, Vehicle, Animal, Weapon*
 - <b>Pose</b> Face boxes have 5 face points *2 x eyes, nose, 2 x mouth*
 - <b>Pose</b> Person boxes have 17 pose points *same as coco-pose*
-- <b>Attributes</b> Person boxes have 35 binary attributes detected *male, female, wearing hat, wearing glasses,...*
+- <b>Attributes</b> Person boxes include 35 binary attributes such as gender (male, female), age group (child, teen, adult, senior), appearance (hat/head covering, mask, glasses, facial hair, buzz cut/bald, shoulder-length hair), clothing (uniform, coat/jacket, long sleeves, shorts, bright colors), colors of top and bottom (white/light, black/gray/dark, blue/purple, green, red/pink, orange/beige/yellow), accessories (bag/backpack), posture (lying down, threatening), build (heavy), tattoos, and presence of weapons.
+- <b>ReID</b> Additional head which produces ReID-embeddings (192 element vectors by default) using a separately trained ReID network fused into the yolo model. Currently reid embeddings only work for person class
 - <b>Dataset</b> Trained on an ensemble dataset of around 350K images from Coco,Openimages,Objects365 & others, re-labelled using DatasetProcessor, with GPT-4o-V for attribute labelling. The dataset/DatasetProcessor config file is not provided, please contact me if you are interested to get hold of it.
 - <b>Weights</b> can be downloaded from links in the [Test Results](#test-results) section
 
@@ -43,18 +45,21 @@ Using map.py from https://github.com/ubonpartners/dataset_processor
 
 These results are the geometric mean of results run on from 5 "val" datasets, three of which are the val sets of Coco, OpenImages, and Objects365
 
+The ReID results are measured top-1 and top-10 recall on a mixed set containing 399 image IDs and 5736 person images from a combination of datasets. Comparisions with "non-R" models are using the basic REID embedding ultralytics recently introduced which uses the raw input to the detect layer as an embedding.
+
 <small>
   
-| Model | size<br><sup>(pixels)  | params<br><sup>(M) | mAP50 Person | mAP50 Face  | mAP50 Vehicle | mAP50 Pose | mAP50 Face KP | mAP50 Attr <br>(Main) | mAP50 Attr <br>(colour) |
-| ---------- | --------- | ----------- | --------------- | ----------- | --------- | --------- |--------- |-------- | ------------ |
-|[Yolo-dpa-l](https://drive.google.com/file/d/1DwRpgS53MtQYM4G7Rm1K7OBxHhguaiI5/view?usp=drive_link)   | 640 | 26.2 | 0.874 | 0.691 | 0.778 | 0.828 | 0.707 | 0.603 | 0.556 |
-|[Yolo-dp-l](https://drive.google.com/file/d/1veVJ9y6Set3oIDtZ47_Zpz6cnYqyMauy/view?usp=drive_link)    | 640 | 26.2 | 0.883 | 0.740 | 0.732 | 0.822 | 0.733 |       |       | 
-|yolo11l      | 640 | 25.3 | 0.850 |       | 0.813 |       |       |       |       |
-|yolo11l-pose | 640 | 26.2 | 0.718 |       |       | 0.845 |       |       |       |
-|[yolo-dpa-s](https://drive.google.com/file/d/1FUK6x26Z8Dz0gqw-20IHrvnUIKl8lLhk/view?usp=drive_link)   | 640 | 10.1 | 0.845 | 0.675 | 0.662 | 0.788 | 0.710 | 0.593 | 0.522 |
-|yolo11-s     | 640 | 9.4  | 0.820 |       | 0.653 |       |       |       |       | 
-|[yolo-dpa-n](https://drive.google.com/file/d/1YDbFnwfd_xvlm4kkRiXCs_FMCPPOTfXP/view?usp=drive_link)   | 640 | 3.0  | 0.798 | 0.658 | 0.545 | 0.718 | 0.691 | 0.494 | 0.449 |
-|yolo11-n     | 640 | 2.6  | 0.758 |       | 0.678 |       |       |       |       | 
+| Model | size<br><sup>(pixels)  | params<br><sup>(M) | mAP50 Person | mAP50 Face  | mAP50 Vehicle | mAP50 Pose | mAP50 Face KP | mAP50 Attr <br>(Main) | mAP50 Attr <br>(colour) |REID recall@K 1 , 10|
+| ---------- | --------- | ----------- | --------------- | ----------- | --------- | --------- |--------- |-------- | ------------ |-----|
+|Yolo-dpar-l|	640	|26.5	|0.874|	0.691	|0.778	|0.828|	0.707	|0.603|	0.556	|0.448 0.781|
+|[Yolo-dpa-l](https://drive.google.com/file/d/1DwRpgS53MtQYM4G7Rm1K7OBxHhguaiI5/view?usp=drive_link)   | 640 | 26.2 | 0.874 | 0.691 | 0.778 | 0.828 | 0.707 | 0.603 | 0.556 |0.158 , 0.297|
+|[Yolo-dp-l](https://drive.google.com/file/d/1veVJ9y6Set3oIDtZ47_Zpz6cnYqyMauy/view?usp=drive_link)    | 640 | 26.2 | 0.883 | 0.740 | 0.732 | 0.822 | 0.733 |       |       | |
+|yolo11l      | 640 | 25.3 | 0.850 |       | 0.813 |       |       |       |       ||
+|yolo11l-pose | 640 | 26.2 | 0.718 |       |       | 0.845 |       |       |       ||
+|[yolo-dpa-s](https://drive.google.com/file/d/1FUK6x26Z8Dz0gqw-20IHrvnUIKl8lLhk/view?usp=drive_link)   | 640 | 10.1 | 0.845 | 0.675 | 0.662 | 0.788 | 0.710 | 0.593 | 0.522 ||
+|yolo11-s     | 640 | 9.4  | 0.820 |       | 0.653 |       |       |       |       | |
+|[yolo-dpa-n](https://drive.google.com/file/d/1YDbFnwfd_xvlm4kkRiXCs_FMCPPOTfXP/view?usp=drive_link)   | 640 | 3.0  | 0.798 | 0.658 | 0.545 | 0.718 | 0.691 | 0.494 | 0.449 ||
+|yolo11-n     | 640 | 2.6  | 0.758 |       | 0.678 |       |       |       |       | |
 
 </small>
 
@@ -79,6 +84,8 @@ These results are the geometric mean of results run on from 5 "val" datasets, th
 ### Inference / how the model differs from standard ultralyics Yolo11 model
 
 The basic model is a standard ultralytics yolo11-pose model. However because the object detector is used to detect attributes some changes are needed for both train and inference. Thr problem is that by default yolo11 will predict only one class label per box, this need to be improved to allow multiple labels (i.e. the 'attributes' are just also detecting 'male' class for the same box as 'person') The code for this was based on [this fork of ultralytics](https://github.com/Danil328/ultralytics.git), modified to also work for pose models.
+
+At the time of writing the standard ultralytics code supports vector output for reid - by enabling an inference hook that copies "feat" vectors. ReID output here works differently with a dedicated new head type (PoseReid). As as result the interface is different - there is no need to enable the hook if you run the model the results should appear by default as a new list of tensors in the results (called reid_embeddings). Note again, they are only valid for person boxes.
 
 Changes are needed both to the loss function during training and also during inference. The inference changes are purely to the postprocessing/interpretation of the model results. By default each "detection" row will have a score for each class and ultralytics will pick the highest scoring class only, prior to NMS. Instead there are a couple of different approaches
 
