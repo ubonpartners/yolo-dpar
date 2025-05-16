@@ -1,0 +1,12 @@
+name: yolo-dpa
+channels:
+  - pytorch
+  - defaults
+  - conda-forge
+dependencies:
+  - python>=3.10
+  - pip
+  - pip:
+    - gdown
+    - git+https://github.com/cribbinsb/ultralytics.git@multilabel
+    - git+https://github.com/cribbinsb/stuff.git
