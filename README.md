@@ -23,7 +23,7 @@ It was also intended to test the [dataset processing pipeline](https://github.co
 These models and technologies are intended as a proof of concept only. Please check out the [license](#licence) and also be mindful of the licenses of the datasets on which these models were trained.
 
 #### Developed/trained using
-- Ultralytics Yolo11/12 (slightly) modified for multi-label detection support (https://github.com/ubonpartners/ultralytics/tree/mdb)
+- Ultralytics Yolo11/12 (slightly) modified for multi-label detection support (https://github.com/ubonpartners/ultralytics/tree/multilabel) <b>you must use the multilabel branch</b>
 - DatasetProcessor (https://github.com/ubonpartners/dataset_processor)
 - AzureML (https://github.com/ubonpartners/azureml)
 - REID tools (https://github.com/ubonparterns/reid) - repository for training the REID adapter network and producing the fused model
@@ -78,6 +78,7 @@ The ReID results are measured top-1 and top-10 recall on a mixed set containing 
 - check out the repository: <b> git clone git@github.com:ubonpartners/yolo-dpa.git  </b>
 - create conda environment: <b> conda env create -f environment.yml </b>
 - activate conda environment: <b> conda activate yolo-dpa </b>
+- you must be using the <b>multilabel</b> branch of the ultralytics fork or you will get unexpected/weird results
 - run: <b> python yolo-dpa-test.py --video webcam --model yolo-dpa-l </b>
 - "video" can we 'webcam' or path to an mp4 file; 'model' can be one of yolo-dpa-l, yolo-dp-l, yolo-dpa-s, yolo-dpa-n
 - the weights should be automatically downloaded if not already present
