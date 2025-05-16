@@ -16,7 +16,7 @@ Contents: [Introduction](#introduction) | [Test Results](#test-results) | [Usage
   </tr>
 </table>
 
-<b>Yolo-DPAR</b> is a set of proof of concept models derived from Ultralytics yolo11 to investigate the performance of combining object detection, pose/keypoint detection, binary attribute detection and ReID embeddings together into a single model, done in one pass. Remarkably, adding all the extra capabilities does not seem to make the model too much worse at the basic object detection versus the original object detection only model, with only a tiny increase in parameter/flop count. Yolo-DPA and Yolo-DP refer to reduced models with the ReID and the ReID+Attributes capabilites ommited respectively.
+<b>Yolo-DPAR</b> is a set of proof of concept models derived from Ultralytics yolo11 to investigate the performance of combining object detection, pose/keypoint detection, binary attribute detection and ReID embedding generation together into a single model, done in one pass. Remarkably, adding all the extra capabilities does not seem to make the model too much worse at the basic object detection versus the original object detection only model, with only a tiny increase in parameter/flop count. Yolo-DPA and Yolo-DP refer to reduced models with the ReID and the ReID+Attributes capabilites ommited respectively.
 
 It was also intended to test the [dataset processing pipeline](https://github.com/ubonpartners/dataset_processor) which attempts things like automatic labelling, combining multiple datasets together, and using vision-LLMs
 
@@ -26,7 +26,7 @@ These models and technologies are intended as a proof of concept only. Please ch
 - Ultralytics Yolo11/12 (slightly) modified for multi-label detection support (https://github.com/ubonpartners/ultralytics/tree/multilabel) <b>you must use the multilabel branch</b>
 - DatasetProcessor (https://github.com/ubonpartners/dataset_processor)
 - AzureML (https://github.com/ubonpartners/azureml)
-- REID tools (https://github.com/ubonparterns/reid) - repository for training the REID adapter network and producing the fused model
+- ReID tools (https://github.com/ubonparterns/reid) - repository for training the ReID adapter network and producing the fused model
 
 #### Test models (weights provided) has
 - <b>Detection</b> of 5 basic classes *Person, Face, Vehicle, Animal, Weapon*
@@ -48,6 +48,8 @@ These results are the geometric mean of results run on from 5 "val" datasets, th
 For, the -dp/-dpa/-dpar models- because these models take a few days to train and I am lazy, they are not all trained for the same number of epochs so comparison may not be very "fair".
 
 The ReID results are measured top-1 and top-10 recall on a mixed set containing 399 image IDs and 5736 person images from a combination of datasets. Comparisions with "non-R" models are using the basic REID embedding ultralytics recently introduced which uses the raw input to the detect layer as an embedding.
+
+<b>Yolo11-dpa-x, yolo12-dpa-l, yolo11-dpar-l -weights</b> - exist, but I have not uploaded or updated the table yet, all this takes some time!
 
 <small>
   
