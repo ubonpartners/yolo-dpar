@@ -45,6 +45,8 @@ Using map.py from https://github.com/ubonpartners/dataset_processor
 
 These results are the geometric mean of results run on from 5 "val" datasets, three of which are the val sets of Coco, OpenImages, and Objects365
 
+For, the -dp/-dpa/-dpar models- because these models take a few days to train and I am lazy, they are not all trained for the same number of epochs so comparison may not be very "fair".
+
 The ReID results are measured top-1 and top-10 recall on a mixed set containing 399 image IDs and 5736 person images from a combination of datasets. Comparisions with "non-R" models are using the basic REID embedding ultralytics recently introduced which uses the raw input to the detect layer as an embedding.
 
 <small>
@@ -52,6 +54,8 @@ The ReID results are measured top-1 and top-10 recall on a mixed set containing 
 | Model | size<br><sup>(pixels)  | params<br><sup>(M) | mAP50 Person | mAP50 Face  | mAP50 Vehicle | mAP50 Pose | mAP50 Face KP | mAP50 Attr <br>(Main) | mAP50 Attr <br>(colour) |REID recall@K 1 , 10|
 | ---------- | --------- | ----------- | --------------- | ----------- | --------- | --------- |--------- |-------- | ------------ |-----|
 |Yolo-dpar-l|	640	|26.5	|0.874|	0.691	|0.778	|0.828|	0.707	|0.603|	0.556	|0.448 0.781|
+|yolo11-dpa-x      |  |  |  |       |  |       |       |       |       ||
+|yolo12-dpa-l      |  |  |  |       |  |       |       |       |       ||
 |[Yolo-dpa-l](https://drive.google.com/file/d/1DwRpgS53MtQYM4G7Rm1K7OBxHhguaiI5/view?usp=drive_link)   | 640 | 26.2 | 0.874 | 0.691 | 0.778 | 0.828 | 0.707 | 0.603 | 0.556 |0.158 , 0.297|
 |[Yolo-dp-l](https://drive.google.com/file/d/1veVJ9y6Set3oIDtZ47_Zpz6cnYqyMauy/view?usp=drive_link)    | 640 | 26.2 | 0.883 | 0.740 | 0.732 | 0.822 | 0.733 |       |       | |
 |yolo11l      | 640 | 25.3 | 0.850 |       | 0.813 |       |       |       |       ||
