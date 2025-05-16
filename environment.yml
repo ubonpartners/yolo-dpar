@@ -1,4 +1,4 @@
-name: yolo-dpa
+name: yolo-dpar
 channels:
   - pytorch
   - defaults
@@ -9,4 +9,3 @@ dependencies:
   - pip:
     - gdown
     - git+https://github.com/cribbinsb/ultralytics.git@multilabel
-    - git+https://github.com/cribbinsb/stuff.git

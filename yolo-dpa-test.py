@@ -2,8 +2,9 @@ import os
 import argparse
 import cv2
 import gdown
-import stuff
 import ultralytics
+import other.display as other_display
+import other.ultralytics as other_ultralytics
 
 def get_weights(model):
     """
@@ -65,19 +66,19 @@ def do_video(video, model):
     display_width=1600
     display_height=900
     highlight_pos=None
-    
-    display=stuff.Display(width=display_width, height=display_height)
+
+    display=other_display.Display(width=display_width, height=display_height)
 
     while True:
         if paused is False:
             ret, frame = cap.read()  # Read a frame from the video
-            
+
         result=yolo(frame, conf=0.2, max_det=500, half=True, verbose=False)
 
         if not ret:
             break  # Break if no frame is read (end of video)
 
-        out_det=stuff.yolo_results_to_dets(result[0],
+        out_det=other_ultralytics.yolo_results_to_dets(result[0],
                                          det_thr=0.2,
                                          yolo_class_names=class_names,
                                          class_names=class_names,
@@ -89,13 +90,13 @@ def do_video(video, model):
 
         highlight_index=None
         if highlight_pos is not None:
-             highlight_index, dist1=stuff.find_gt_from_point(out_det, highlight_pos[0], highlight_pos[1])
-        stuff.draw_boxes(display,
+             highlight_index, dist1=other_ultralytics.find_gt_from_point(out_det, highlight_pos[0], highlight_pos[1])
+        other_ultralytics.draw_boxes(display,
                          out_det,
                          attributes=attributes,
                          highlight_index=highlight_index,
                          class_names=class_names)
-    
+
         display.show(frame, title="results")
         events=display.get_events(5)
         for e in events:
