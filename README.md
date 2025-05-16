@@ -79,9 +79,9 @@ The ReID results are measured top-1 and top-10 recall on a mixed set containing 
 #### Test app 
 
 
-- check out the repository: <b> git clone git@github.com:ubonpartners/yolo-dpa.git  </b>
+- check out the repository: <b> git clone git@github.com:ubonpartners/yolo-dpar.git  </b>
 - create conda environment: <b> conda env create -f environment.yml </b>
-- activate conda environment: <b> conda activate yolo-dpa </b>
+- activate conda environment: <b> conda activate yolo-dpar </b>
 - <b>install the dependencies I haven't gotten round to adding to the environment yet</b> - sorry :(
 - you must be using the <b>multilabel</b> branch of the ultralytics fork or you will get unexpected/weird results
 - run: <b> python yolo-dpa-test.py --video webcam --model yolo-dpa-l </b>
