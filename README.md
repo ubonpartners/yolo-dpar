@@ -57,7 +57,8 @@ The ReID results are measured top-1 and top-10 recall on a mixed set containing 
 | Model | params<br><sup>(M) | mAP50 Person | mAP50 Face  | mAP50 Vehicle | mAP50 Pose | mAP50 Face KP | mAP50 Attr <br>(Main) | mAP50 Attr <br>(colour) |REID recall@K 1 , 10|
 | ---------- |  ----------- | --------------- | ----------- | --------- | --------- |--------- |-------- | ------------ |-----|
 |[Yolo11l-dpar-210525](https://drive.google.com/file/d/15R2s1vqeKMmrqck7HMkzR7Bo_50z9e-o/view?usp=drive_link)|	26.5	|0.856|	0.823	|0.695	|0.826|	0.779	|0.585|	0.556	|0.256,0.618|
-|yolo11x-dpa       |  |  |       |  |       |       |       |       |0.035,0.117|
+|Yolo11l-dpa-210525|	26.2	|0.856|	0.823	|0.695	|0.826|	0.779	|0.585|	0.556	|0.035,0.117|
+|yolo11x-dpa       |  |  |       |  |       |       |       |       ||
 |yolo12l-dpa       |  |  |       |  |       |       |       |       ||
 |[Yolo11l-dpa-131224](https://drive.google.com/file/d/1DwRpgS53MtQYM4G7Rm1K7OBxHhguaiI5/view?usp=drive_link)   | 26.2 | 0.84| 0.786 | 0.66 | 0.798 | 0.744 | 0.561 | 0.54 | |
 |[Yolo11l-dp-291024](https://drive.google.com/file/d/1veVJ9y6Set3oIDtZ47_Zpz6cnYqyMauy/view?usp=drive_link)    |  26.2 | 0.849 | 0.854 | 0.648 | 0.790 | 0.779 |       |       | |
