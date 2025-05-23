@@ -56,17 +56,18 @@ The ReID results are measured top-1 and top-10 recall on a mixed set containing 
   
 | Model | params<br><sup>(M) | mAP50 Person | mAP50 Face  | mAP50 Vehicle | mAP50 Pose | mAP50 Face KP | mAP50 Attr <br>(Main) | mAP50 Attr <br>(colour) |REID recall@K 1 , 10|
 | ---------- |  ----------- | --------------- | ----------- | --------- | --------- |--------- |-------- | ------------ |-----|
-|Yolo-dpar-l|	26.5	|0.874|	0.691	|0.778	|0.828|	0.707	|0.603|	0.556	|0.448 0.781|
-|yolo11-dpa-x       |  |  |       |  |       |       |       |       ||
-|yolo12-dpa-l       |  |  |       |  |       |       |       |       ||
-|[Yolo-dpa-l](https://drive.google.com/file/d/1DwRpgS53MtQYM4G7Rm1K7OBxHhguaiI5/view?usp=drive_link)   | 26.2 | 0.874 | 0.691 | 0.778 | 0.828 | 0.707 | 0.603 | 0.556 |0.158 , 0.297|
-|[Yolo-dp-l](https://drive.google.com/file/d/1veVJ9y6Set3oIDtZ47_Zpz6cnYqyMauy/view?usp=drive_link)    |  26.2 | 0.883 | 0.740 | 0.732 | 0.822 | 0.733 |       |       | |
-|yolo11l      | 25.3 | 0.850 |       | 0.813 |       |       |       |       ||
-|yolo11l-pose |  26.2 | 0.718 |       |       | 0.845 |       |       |       ||
-|[yolo-dpa-s](https://drive.google.com/file/d/1FUK6x26Z8Dz0gqw-20IHrvnUIKl8lLhk/view?usp=drive_link)   |  10.1 | 0.845 | 0.675 | 0.662 | 0.788 | 0.710 | 0.593 | 0.522 ||
-|yolo11-s     | 9.4  | 0.820 |       | 0.653 |       |       |       |       | |
-|[yolo-dpa-n](https://drive.google.com/file/d/1YDbFnwfd_xvlm4kkRiXCs_FMCPPOTfXP/view?usp=drive_link)   |  3.0  | 0.798 | 0.658 | 0.545 | 0.718 | 0.691 | 0.494 | 0.449 ||
-|yolo11-n     |  2.6  | 0.758 |       | 0.678 |       |       |       |       | |
+|Yolo11l-dpar-210525|	26.5	|0.856|	0.823	|0.695	|0.826|	0.779	|0.585|	0.556	|0.256,0.618|
+|yolo11x-dpa       |  |  |       |  |       |       |       |       |0.035,0.117|
+|yolo12l-dpa       |  |  |       |  |       |       |       |       ||
+|[Yolo11l-dpa-131224](https://drive.google.com/file/d/1DwRpgS53MtQYM4G7Rm1K7OBxHhguaiI5/view?usp=drive_link)   | 26.2 | 0.84| 0.786 | 0.66 | 0.798 | 0.744 | 0.561 | 0.54 | |
+|[Yolo11l-dp-291024](https://drive.google.com/file/d/1veVJ9y6Set3oIDtZ47_Zpz6cnYqyMauy/view?usp=drive_link)    |  26.2 | 0.849 | 0.854 | 0.648 | 0.790 | 0.779 |       |       | |
+|yolo11l-r    | 25.3 | 0.806 |       | 0.727 |       |       |       |       |0.070, 0.309|
+|yolo11l      | 25.3 | 0.806 |       | 0.727 |       |       |       |       |0.023,0.082|
+|yolo11l-pose |  26.2 | |       |       |  |       |       |       ||
+|[yolo-dpa-s-21124](https://drive.google.com/file/d/1FUK6x26Z8Dz0gqw-20IHrvnUIKl8lLhk/view?usp=drive_link)   |  10.1 | 0.818 | 0.755 | 0.556 | 0.757 | 0.741 | 0.5 | 0.477 ||
+|yolo11-s     | 9.4  | 0.773 |       | 0.629 |       |       |       |       | |
+|[yolo-dpa-n-251224](https://drive.google.com/file/d/1YDbFnwfd_xvlm4kkRiXCs_FMCPPOTfXP/view?usp=drive_link)   |  3.0  | 0.779 | 0.682 | 0.443 | 0.692 | 0.683 | 0.431 | 0.437 ||
+|yolo11-n     |  2.6  | 0.725 |       | 0.549 |       |       |       |       | |
 
 </small>
 </div>
