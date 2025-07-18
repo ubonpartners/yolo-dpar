@@ -1,4 +1,4 @@
-# yolo-dpar : Yolo11/12 + Simultaneous Detection, Pose, Attributes, ReID
+# yolo-dparf : Yolo11/12 + Simultaneous Detection, Pose, Attributes, ReID, FIQA
 Contents: [Introduction](#introduction) | [Test Results](#test-results) | [Usage](#usage) | [License](#license)
 
 ---
@@ -16,7 +16,7 @@ Contents: [Introduction](#introduction) | [Test Results](#test-results) | [Usage
   </tr>
 </table>
 
-<b>Yolo-DPAR</b> is a set of proof of concept models derived from Ultralytics yolo11 to investigate the performance of combining object detection, pose/keypoint detection, binary attribute detection and ReID embedding generation together into a single model, done in one pass. Remarkably, adding all the extra capabilities does not seem to make the model too much worse at the basic object detection versus the original object detection only model, with only a tiny increase in parameter/flop count. Yolo-DPA and Yolo-DP refer to reduced models with the ReID and the ReID+Attributes capabilites ommited respectively.
+<b>Yolo-DPAR</b> is a set of proof of concept models derived from Ultralytics yolo11 to investigate the performance of combining object detection, pose/keypoint detection, binary attribute detection, ReID embedding generation, and Face Image Quality Assessement (FIQA) together into a single model, done in one pass. Remarkably, adding all the extra capabilities does not seem to make the model too much worse at the basic object detection versus the original object detection only model, with only a tiny increase in parameter/flop count. Yolo-DPA and Yolo-DP refer to reduced models with the ReID and the ReID+Attributes capabilites ommited respectively.
 
 It was also intended to test the [dataset processing pipeline](https://github.com/ubonpartners/dataset_processor) which attempts things like automatic labelling, combining multiple datasets together, and using vision-LLMs
 
@@ -30,10 +30,11 @@ These models and technologies are intended as a proof of concept only. Please ch
 
 #### Test models (weights provided) has
 - <b>Detection</b> of 5 basic classes *Person, Face, Vehicle, Animal, Weapon*
-- <b>Pose</b> Face boxes have 5 face points *2 x eyes, nose, 2 x mouth*
-- <b>Pose</b> Person boxes have 17 pose points *same as coco-pose*
+- <b>Pose</b> Face boxes have 5 face points *2 x eyes, nose, 2 x mouth* + <b>Pose</b> Person boxes have 17 pose points *same as coco-pose*
+- OR <b>Facepose</b> combined facepoint and pose-point detection in Person detections
 - <b>Attributes</b> Person boxes include 35 binary attributes such as gender (male, female), age group (child, teen, adult, senior), appearance (hat/head covering, mask, glasses, facial hair, buzz cut/bald, shoulder-length hair), clothing (uniform, coat/jacket, long sleeves, shorts, bright colors), colors of top and bottom (white/light, black/gray/dark, blue/purple, green, red/pink, orange/beige/yellow), accessories (bag/backpack), posture (lying down, threatening), build (heavy), tattoos, and presence of weapons.
 - <b>ReID</b> Additional head which produces ReID-embeddings (192 element vectors by default) using a separately trained ReID network fused into the yolo model. Currently reid embeddings only work for person class
+- <b>FIQA</b> Trained to 'rate' the image quality of the face of detected people (including impact of size, blur, occlusion, orientation, etc)
 - <b>Dataset</b> Trained on an ensemble dataset of around 350K images from Coco,Openimages,Objects365 & others, re-labelled using DatasetProcessor, with GPT-4o-V for attribute labelling. The dataset/DatasetProcessor config file is not provided, please contact me if you are interested to get hold of it.
 - <b>Weights</b> can be downloaded from links in the [Test Results](#test-results) section
 
