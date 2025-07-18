@@ -31,7 +31,7 @@ These models and technologies are intended as a proof of concept only. Please ch
 #### Test models (weights provided) has
 - <b>Detection</b> of 5 basic classes *Person, Face, Vehicle, Animal, Weapon*
 - <b>Pose</b> Face boxes have 5 face points *2 x eyes, nose, 2 x mouth* + <b>Pose</b> Person boxes have 17 pose points *same as coco-pose*
-- OR <b>Facepose</b> combined facepoint and pose-point detection in Person detections
+- OR <b>Facepose</b> 19-combined facepoint and pose-point detection in Person detections
 - <b>Attributes</b> Person boxes include 35 binary attributes such as gender (male, female), age group (child, teen, adult, senior), appearance (hat/head covering, mask, glasses, facial hair, buzz cut/bald, shoulder-length hair), clothing (uniform, coat/jacket, long sleeves, shorts, bright colors), colors of top and bottom (white/light, black/gray/dark, blue/purple, green, red/pink, orange/beige/yellow), accessories (bag/backpack), posture (lying down, threatening), build (heavy), tattoos, and presence of weapons.
 - <b>ReID</b> Additional head which produces ReID-embeddings (192 element vectors by default) using a separately trained ReID network fused into the yolo model. Currently reid embeddings only work for person class
 - <b>FIQA</b> Trained to 'rate' the image quality of the face of detected people (including impact of size, blur, occlusion, orientation, etc)
