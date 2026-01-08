@@ -7,12 +7,12 @@ Contents: [Introduction](#introduction) | [Test Results](#test-results) | [Usage
 
 <table>
   <tr>
-    <td><img src="https://github.com/user-attachments/assets/a63b2f93-aeda-402e-9f2a-a619800d9730" width="400"></td>
-    <td><img src="https://github.com/user-attachments/assets/a8b9072b-ea04-417e-9cda-548684f24d7b" width="400"></td>
+    <td><img src="https://raw.githubusercontent.com/ubonpartners/yolo-dpar/main/images/p0.png" width="400"></td>
+    <td><img src="https://raw.githubusercontent.com/ubonpartners/yolo-dpar/main/images/p1.png" width="400"></td>
   </tr>
   <tr>
-    <td><img src="https://github.com/user-attachments/assets/fcd2a18e-b4aa-4beb-a777-a554455d57c8" width="400"></td>
-    <td><img src="https://github.com/user-attachments/assets/2e7fe043-9ef5-4db2-a041-ef9272e598dc" width="400"></td>
+    <td><img src="https://raw.githubusercontent.com/ubonpartners/yolo-dpar/main/images/p2.png" width="400"></td>
+    <td><img src="https://raw.githubusercontent.com/ubonpartners/yolo-dpar/main/images/p3.png" width="400"></td>
   </tr>
 </table>
 
