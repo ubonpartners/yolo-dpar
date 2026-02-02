@@ -1,8 +1,11 @@
-# YOLO-DPAR
+# YOLO26-DPARF
 
 **One-pass YOLO26 models that jointly do detection + pose/keypoints + attributes + ReID embeddings + face image quality (FIQA)** *(also works with YOLO11/12)*.
 
 These models are a proof-of-concept: the goal is to **collapse multiple downstream vision tasks into a single forward pass** with minimal extra compute/params, while keeping core detection quality close to a “normal” detector.
+
+- This code, and the training code builds on the Ultralytics codebase and is subject to inherited license conditions from that project.
+- Example weights were trained on a large number of datasets fused together and are subject to license conditions of those datasets.
 
 | Example | Example |
 |---|---|
