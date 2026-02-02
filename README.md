@@ -1,11 +1,10 @@
-# YOLO26-DPARF
+# YOLO-DPAR
 
 **One-pass YOLO26 models that jointly do detection + pose/keypoints + attributes + ReID embeddings + face image quality (FIQA)** *(also works with YOLO11/12)*.
 
 These models are a proof-of-concept: the goal is to **collapse multiple downstream vision tasks into a single forward pass** with minimal extra compute/params, while keeping core detection quality close to a “normal” detector.
 
-- This code, and the training code builds on the Ultralytics codebase and is subject to inherited license conditions from that project.
-- Example weights were trained on a large number of datasets fused together and are subject to license conditions of those datasets.
+Built on top of the excellent [Ultralytics](https://github.com/ultralytics/ultralytics) codebase, with a small fork/branch to enable multi-label per-box outputs (needed for attributes).
 
 | Example | Example |
 |---|---|
@@ -33,6 +32,7 @@ YOLO-DPAR instead aims for:
 - **Single forward pass**: one model invocation produces boxes + keypoints + attribute scores + ReID vectors (+ FIQA).
 - **Tiny overhead**: the added heads are designed to be light compared to running multiple separate networks.
 - **Deployment simplicity**: fewer models to version, fewer pre/post steps, fewer latency spikes.
+- **Dataset-first training**: the “secret sauce” is the training data. These models were trained on a large **multi-source merged dataset** assembled with the [Dataset Processor](https://github.com/ubonpartners/dataset-processor) pipeline (automatic relabeling/cleanup, dataset completion, hard example mining, and vision-LLM attribute labeling), which improves robustness and generalization.
 
 This is useful anywhere you want **rich metadata per person** in real time (analytics, safety, search, tracking/re-identification pipelines, and dataset mining).
 
@@ -127,8 +127,9 @@ These are the default attribute labels/classes used by the DPA/DPAR variants:
 
 Training notes:
 
-- Models were trained on a ~350K-image mixed dataset built from COCO/OpenImages/Objects365/others, reprocessed with the dataset pipeline.
-- Attribute labels were produced using a vision LLM (dataset config is not published; contact me if you need it).
+- These models were trained on a large **ensemble dataset** created by joining multiple sources (COCO, OpenImages, Objects365, and others) using the [Dataset Processor](https://github.com/ubonpartners/dataset-processor).
+- The pipeline is **config-driven and repeatable**, and supports dataset “completion” (add missing boxes/keypoints using strong detectors), plus **hard example mining** / hard-negative style mining to bias training towards what matters.
+- Person **binary attributes** were labeled automatically using a **vision LLM** (dataset config is not published; contact me if you need it).
 
 ## Results and weights
 
@@ -253,6 +254,7 @@ ReID note:
 
 ## Related repositories
 
+- [Ultralytics (upstream)](https://github.com/ultralytics/ultralytics)
 - [Ultralytics fork](https://github.com/ubonpartners/ultralytics/tree/multilabel) (required `multilabel` branch)
 - [Dataset Processor](https://github.com/ubonpartners/dataset-processor) (dataset build + `map.py` evaluation)
 - [AzureML tools](https://github.com/ubonpartners/azureml) (training helpers)
