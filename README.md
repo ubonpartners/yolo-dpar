@@ -4,7 +4,7 @@
 
 These models are a proof-of-concept: the goal is to **collapse multiple downstream vision tasks into a single forward pass** with minimal extra compute/params, while keeping core detection quality close to a “normal” detector.
 
-Built on top of the excellent [Ultralytics](https://github.com/ultralytics/ultralytics) codebase, with a small fork/branch to enable multi-label per-box outputs (needed for attributes).
+Built on top of the excellent [Ultralytics](https://github.com/ultralytics/ultralytics) codebase, with a small fork/branch to enable **multi-label per-box outputs** (needed for attributes) and a **ReID head** that outputs `reid_embeddings` for each `person` detection.
 
 | Example | Example |
 |---|---|
@@ -42,7 +42,8 @@ The repo name “DPAR” reflects the full model. In practice you’ll see a sma
 
 - **DP**: Detection + pose/keypoints (person pose and face keypoints).
 - **DPA**: DP + **binary attributes** per person.
-- **DPAR**: DPA + **ReID embeddings** (+ **FIQA** for faces).
+- **DPAR**: DPA + **ReID embeddings** (the **R**).
+- **DPARF**: DPAR + **FIQA** face quality score (the **F**).
 
 ## What the models output
 
@@ -59,7 +60,7 @@ In the provided demo setup, the “full” models can produce:
 
 ### Default binary attributes (`person_*`)
 
-These are the default attribute labels/classes used by the DPA/DPAR variants:
+These are the default attribute labels/classes used by the DPA/DPAR/DPARF variants:
 
 - **Demographics**
   - `person_is_male`, `person_is_female`
@@ -251,6 +252,7 @@ The current demo app follows approach (A). The model changes required for traini
 ReID note:
 
 - Unlike Ultralytics’ feature-copy hook, DPAR uses a dedicated head (PoseReID-style) and outputs `reid_embeddings` directly in the inference results (valid for `person` boxes).
+- For better ReID embeddings, you can train a small **ReID adapter** in [`ubonpartners/reid`](https://github.com/ubonpartners/reid) and **fuse it into the YOLO checkpoint** (so ReID embeddings come from the learned adapter rather than raw detection-head features). This is independent of the **F** suffix (which refers to FIQA).
 
 ## Related repositories
 
