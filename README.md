@@ -1,123 +1,268 @@
-# yolo-dparf : Yolo11/12 + Simultaneous Detection, Pose, Attributes, ReID, FIQA
-Contents: [Introduction](#introduction) | [Test Results](#test-results) | [Usage](#usage) | [License](#license)
+# YOLO-DPAR
 
----
+**One-pass YOLO26 models that jointly do detection + pose/keypoints + attributes + ReID embeddings + face image quality (FIQA)** *(also works with YOLO11/12)*.
 
-### Introduction
+These models are a proof-of-concept: the goal is to **collapse multiple downstream vision tasks into a single forward pass** with minimal extra compute/params, while keeping core detection quality close to a “normal” detector.
 
-<table>
-  <tr>
-    <td><img src="https://raw.githubusercontent.com/ubonpartners/yolo-dpar/main/images/p0.png" width="400"></td>
-    <td><img src="https://raw.githubusercontent.com/ubonpartners/yolo-dpar/main/images/p1.png" width="400"></td>
-  </tr>
-  <tr>
-    <td><img src="https://raw.githubusercontent.com/ubonpartners/yolo-dpar/main/images/p2.png" width="400"></td>
-    <td><img src="https://raw.githubusercontent.com/ubonpartners/yolo-dpar/main/images/p3.png" width="400"></td>
-  </tr>
-</table>
+| Example | Example |
+|---|---|
+| <img src="https://raw.githubusercontent.com/ubonpartners/yolo-dpar/main/images/p0.png" width="420" alt="DPAR example 0"> | <img src="https://raw.githubusercontent.com/ubonpartners/yolo-dpar/main/images/p1.png" width="420" alt="DPAR example 1"> |
+| <img src="https://raw.githubusercontent.com/ubonpartners/yolo-dpar/main/images/p2.png" width="420" alt="DPAR example 2"> | <img src="https://raw.githubusercontent.com/ubonpartners/yolo-dpar/main/images/p3.png" width="420" alt="DPAR example 3"> |
 
-<b>Yolo-DPAR</b> is a set of proof of concept models derived from Ultralytics yolo11 to investigate the performance of combining object detection, pose/keypoint detection, binary attribute detection, ReID embedding generation, and Face Image Quality Assessement (FIQA) together into a single model, done in one pass. Remarkably, adding all the extra capabilities does not seem to make the model too much worse at the basic object detection versus the original object detection only model, with only a tiny increase in parameter/flop count. Yolo-DPA and Yolo-DP refer to reduced models with the ReID and the ReID+Attributes capabilites ommited respectively.
+## Contents
 
-It was also intended to test the [dataset processing pipeline](https://github.com/ubonpartners/dataset_processor) which attempts things like automatic labelling, combining multiple datasets together, and using vision-LLMs
+- [What’s unique here](#whats-unique-here)
+- [Model family (DP / DPA / DPAR)](#model-family-dp--dpa--dpar)
+- [What the models output](#what-the-models-output)
+- [Results and weights](#results-and-weights)
+- [Quickstart (demo app)](#quickstart-demo-app)
+- [Training (local, standalone)](#training-local-standalone)
+- [How it works (multi-label per box)](#how-it-works-multi-label-per-box)
+- [Related repositories](#related-repositories)
+- [License](#license)
 
-These models and technologies are intended as a proof of concept only. Please check out the [license](#licence) and also be mindful of the licenses of the datasets on which these models were trained.
+## What’s unique here
 
-#### Developed/trained using
-- Ultralytics Yolo11/12 (slightly) modified for multi-label detection support (https://github.com/ubonpartners/ultralytics/tree/multilabel) <b>you must use the multilabel branch</b>
-- DatasetProcessor (https://github.com/ubonpartners/dataset_processor)
-- AzureML (https://github.com/ubonpartners/azureml)
-- ReID tools (https://github.com/ubonparterns/reid) - repository for training the ReID adapter network and producing the fused model
+Most pipelines do: **detect → crop → run pose model → run attribute model → run ReID model → run face quality model**.
 
-#### Test models (weights provided) has
-- <b>Detection</b> of 5 basic classes *Person, Face, Vehicle, Animal, Weapon*
-- <b>Pose</b> Face boxes have 5 face points *2 x eyes, nose, 2 x mouth* + <b>Pose</b> Person boxes have 17 pose points *same as coco-pose*
-- OR <b>Facepose</b> 19-combined facepoint and pose-point detection in Person detections
-- <b>Attributes</b> Person boxes include 35 binary attributes such as gender (male, female), age group (child, teen, adult, senior), appearance (hat/head covering, mask, glasses, facial hair, buzz cut/bald, shoulder-length hair), clothing (uniform, coat/jacket, long sleeves, shorts, bright colors), colors of top and bottom (white/light, black/gray/dark, blue/purple, green, red/pink, orange/beige/yellow), accessories (bag/backpack), posture (lying down, threatening), build (heavy), tattoos, and presence of weapons.
-- <b>ReID</b> Additional head which produces ReID-embeddings (192 element vectors by default) using a separately trained ReID network fused into the yolo model. Currently reid embeddings only work for person class
-- <b>FIQA</b> Trained to 'rate' the image quality of the face of detected people (including impact of size, blur, occlusion, orientation, etc)
-- <b>Dataset</b> Trained on an ensemble dataset of around 350K images from Coco,Openimages,Objects365 & others, re-labelled using DatasetProcessor, with GPT-4o-V for attribute labelling. The dataset/DatasetProcessor config file is not provided, please contact me if you are interested to get hold of it.
-- <b>Weights</b> can be downloaded from links in the [Test Results](#test-results) section
+YOLO-DPAR instead aims for:
 
----
+- **Single forward pass**: one model invocation produces boxes + keypoints + attribute scores + ReID vectors (+ FIQA).
+- **Tiny overhead**: the added heads are designed to be light compared to running multiple separate networks.
+- **Deployment simplicity**: fewer models to version, fewer pre/post steps, fewer latency spikes.
 
-### Test results
+This is useful anywhere you want **rich metadata per person** in real time (analytics, safety, search, tracking/re-identification pipelines, and dataset mining).
 
-Using map.py from https://github.com/ubonpartners/dataset_processor
+## Model family (DP / DPA / DPAR)
 
-These results are the geometric mean of results run on from 5 "val" datasets, three of which are the val sets of Coco, OpenImages, and Objects365. All results are for the model running at 640x640 pixels
+The repo name “DPAR” reflects the full model. In practice you’ll see a small family:
 
-For, the -dp/-dpa/-dpar models- because these models take a few days to train and I am lazy, they are not all trained for the same number of epochs so comparison may not be very "fair".
+- **DP**: Detection + pose/keypoints (person pose and face keypoints).
+- **DPA**: DP + **binary attributes** per person.
+- **DPAR**: DPA + **ReID embeddings** (+ **FIQA** for faces).
 
-The ReID results are measured top-1 and top-10 recall on a mixed set containing 399 image IDs and 5736 person images from a combination of datasets. Comparisions with "non-R" models are using the basic REID embedding ultralytics recently introduced which uses the raw input to the detect layer as an embedding.
+## What the models output
 
-<b>Yolo11-dpa-x, yolo12-dpa-l, yolo11-dpar-l -weights</b> - exist, but I have not uploaded or updated the table yet, all this takes some time!
+In the provided demo setup, the “full” models can produce:
 
-<div style="overflow-x: auto;">
-<small>
-  
-| Model | params<br><sup>(M) | mAP50 Person | mAP50 Face  | mAP50 Vehicle | mAP50 Pose | mAP50 Face KP | mAP50 Attr <br>(Main) | mAP50 Attr <br>(colour) |REID recall@K 1 , 10|
-| ---------- |  ----------- | --------------- | ----------- | --------- | --------- |--------- |-------- | ------------ |-----|
-|Yolo11l-dpar-250525|	26.5	|0.864|	0.833	|0.699	|0.827|	0.779	|0.588|	0.569	|0.476,0.792|
-|[Yolo11l-dpar-210525](https://drive.google.com/file/d/15R2s1vqeKMmrqck7HMkzR7Bo_50z9e-o/view?usp=drive_link)|	26.5	|0.856|	0.823	|0.695	|0.826|	0.779	|0.585|	0.556	|0.256,0.618|
-|Yolo11l-dpa-210525|	26.2	|0.856|	0.823	|0.695	|0.826|	0.779	|0.585|	0.556	|0.035,0.117|
-|yolo11x-dpa       |  |  |       |  |       |       |       |       ||
-|yolo12l-dpa       |  |  |       |  |       |       |       |       ||
-|[Yolo11l-dpa-131224](https://drive.google.com/file/d/1DwRpgS53MtQYM4G7Rm1K7OBxHhguaiI5/view?usp=drive_link)   | 26.2 | 0.84| 0.786 | 0.66 | 0.798 | 0.744 | 0.561 | 0.54 | |
-|[Yolo11l-dp-291024](https://drive.google.com/file/d/1veVJ9y6Set3oIDtZ47_Zpz6cnYqyMauy/view?usp=drive_link)    |  26.2 | 0.849 | 0.854 | 0.648 | 0.790 | 0.779 |       |       | |
-|yolo11l-r    | 25.3 | 0.806 |       | 0.727 |       |       |       |       |0.070, 0.309|
-|yolo11l      | 25.3 | 0.806 |       | 0.727 |       |       |       |       |0.023,0.082|
-|yolo11l-pose |  26.2 |0.688 |       |       | 0.813 |       |       |       ||
-|[yolo-dpa-s-21124](https://drive.google.com/file/d/1FUK6x26Z8Dz0gqw-20IHrvnUIKl8lLhk/view?usp=drive_link)   |  10.1 | 0.818 | 0.755 | 0.556 | 0.757 | 0.741 | 0.5 | 0.477 ||
-|yolo11-s     | 9.4  | 0.773 |       | 0.629 |       |       |       |       | |
-|[yolo-dpa-n-251224](https://drive.google.com/file/d/1YDbFnwfd_xvlm4kkRiXCs_FMCPPOTfXP/view?usp=drive_link)   |  3.0  | 0.779 | 0.682 | 0.443 | 0.692 | 0.683 | 0.431 | 0.437 ||
-|yolo11-n     |  2.6  | 0.725 |       | 0.549 |       |       |       |       | |
+- **Detection**: 5 base classes: `person`, `face`, `vehicle`, `animal`, `weapon`
+- **Keypoints**
+  - Faces: 5 points (2× eyes, nose, 2× mouth corners)
+  - Persons: 17 points (COCO pose)
+  - Optional **facepose** mode: 19 combined points on the person detection
+- **Attributes (binary, on person boxes)**: a set of learned `person_*` attributes (listed below)
+- **ReID embeddings**: a dedicated head outputs a ReID vector (default 192-d) for **person** detections
+- **FIQA**: a face-quality score intended to capture effects like size/blur/occlusion/orientation
 
-</small>
-</div>
+### Default binary attributes (`person_*`)
 
----
+These are the default attribute labels/classes used by the DPA/DPAR variants:
 
-### Usage
+- **Demographics**
+  - `person_is_male`, `person_is_female`
+  - `person_is_child`, `person_is_teen`, `person_is_adult`, `person_is_senior`
 
+- **Face / head / appearance**
+  - `person_is_wearing_hat_or_head_covering`
+  - `person_is_wearing_a_mask_or_face_covering`
+  - `person_wearing_glasses_or_sunglasses`
+  - `person_has_facial_hair`
+  - `person_has_shoulder_length_hair`
+  - `person_has_buzz_cut_or_bald_head`
 
-#### Test app 
+- **Accessories / carried items**
+  - `person_has_bag_or_backpack`
+  - `person_is_holding_mobile_phone`
 
+- **Clothing (type / style)**
+  - `person_is_wearing_a_uniform`
+  - `person_has_long_sleeves`
+  - `person_is_wearing_shorts`
+  - `person_is_wearing_a_coat_or_jacket`
+  - `person_is_wearing_hoodie`
+  - `person_is_wearing_bright_colored_clothing`
+  - `person_is_wearing_hi_vis_clothes`
+  - `person_has_patterned_clothing`
+  - `person_clothing_has_prominent_logo`
 
-- check out the repository: <b> git clone git@github.com:ubonpartners/yolo-dpar.git  </b>
-- create conda environment: <b> conda env create -f environment.yml </b>
-- activate conda environment: <b> conda activate yolo-dpar </b>
-- <b>install the dependencies I haven't gotten round to adding to the environment yet</b> - sorry :(
-- you must be using the <b>multilabel</b> branch of the ultralytics fork or you will get unexpected/weird results
-- run: <b> python yolo-dpa-test.py --video webcam --model yolo-dpa-l </b>
-- "video" can we 'webcam' or path to an mp4 file; 'model' can be one of yolo-dpa-l, yolo-dp-l, yolo-dpa-s, yolo-dpa-n
-- the weights should be automatically downloaded if not already present
-- press "P" to pause the video; click on a person box to see the attributes
-  
-![Screenshot from 2025-02-02 10-47-36](https://github.com/user-attachments/assets/f967c14d-e6c1-4938-9045-542131423c6e)
+- **Body / pose / activity**
+  - `person_has_heavy_build`
+  - `person_is_lying_down`
+  - `person_has_a_threatening_posture`
+  - `person_is_running`
+  - `person_is_fighting`
+  - `person_is_behind_camera`
 
-### Inference / how the model differs from standard ultralyics Yolo11 model
+- **Weapons / safety**
+  - `person_is_carrying_a_weapon`
+  - `person_weapon_held_in_hands`
 
-The basic model is a standard ultralytics yolo11-pose model. However because the object detector is used to detect attributes some changes are needed for both train and inference. Thr problem is that by default yolo11 will predict only one class label per box, this need to be improved to allow multiple labels (i.e. the 'attributes' are just also detecting 'male' class for the same box as 'person') The code for this was based on [this fork of ultralytics](https://github.com/Danil328/ultralytics.git), modified to also work for pose models.
+- **Visible tattoos**
+  - `person_has_visible_tattoos`
 
-At the time of writing the standard ultralytics code supports vector output for reid - by enabling an inference hook that copies "feat" vectors. ReID output here works differently with a dedicated new head type (PoseReid). As as result the interface is different - there is no need to enable the hook if you run the model the results should appear by default as a new list of tensors in the results (called reid_embeddings). Note again, they are only valid for person boxes.
+- **Smoking**
+  - `person_is_smoking_or_vaping`
 
-Changes are needed both to the loss function during training and also during inference. The inference changes are purely to the postprocessing/interpretation of the model results. By default each "detection" row will have a score for each class and ultralytics will pick the highest scoring class only, prior to NMS. Instead there are a couple of different approaches
+- **Clothing color attributes**
+  - **Top**
+    - `person_top_is_white_or_light`
+    - `person_top_is_black_or_gray_or_dark`
+    - `person_top_is_blue_or_purple`
+    - `person_top_is_green`
+    - `person_top_is_red_or_pink`
+    - `person_top_is_orange_or_beige_or_yellow`
+  - **Bottom**
+    - `person_bottom_is_white_or_light`
+    - `person_bottom_is_black_or_gray_or_dark`
+    - `person_bottom_is_blue_or_purple`
+    - `person_bottom_is_green`
+    - `person_bottom_is_red_or_pink`
+    - `person_bottom_is_orange_or_beige_or_yellow`
 
-- (A) "expand" the detection to multiple detections, one for each class where the score is greater than the threshold, then produce boxes as normal using NMS. This will result in separate output boxes for "person", "person_male", "person_with_beard" etc which can then be combined together in a post-processing step
+- **FIQA threshold attributes** (derived from face quality score)
+  - `person_fiqa_0.05`, `person_fiqa_0.25`, `person_fiqa_0.45`, `person_fiqa_0.65`, `person_fiqa_0.85`
 
-- (B) Remove the "attribute classes" before NMS. Post NMS add an attribute vector to the detection where the corresponding score for each attribute is the "max" of all the boxes that were combined/removed in the NMS step for that detection.
+Training notes:
 
-In my opinion (B) is the better option. However note that the modified ultralytics / test app used here are doing (A).
+- Models were trained on a ~350K-image mixed dataset built from COCO/OpenImages/Objects365/others, reprocessed with the dataset pipeline.
+- Attribute labels were produced using a vision LLM (dataset config is not published; contact me if you need it).
 
----
+## Results and weights
 
-### License
+**YOLO26 mAP values, tables, and weights are in progress.** The results below are from the earlier YOLO11/12-based model family.
 
-This work, is dual-licensed under <b>AGPL</b>, for <b> noncommercial use only</b>, and under the <b>Ubon cooperative license</b>..
-The weights were trained using code derived from <b>Ultralytics</b> and as such are subject to AGPL and conditions as specified by Ultralytics.
-Additional restrictions may be imposed by licenses of the datasets on which these models were trained.
+Evaluation details:
 
-Please contact [me](mailto:bernandocribbenza@gmail.com?subject=yolo-dpa%20question&body=Your-code-is-rubbish!) if any questions.
+- Metrics were computed using `map.py` from the Dataset Processor repo.
+- The “overall” values are a geometric mean over 5 validation sets (including COCO/OpenImages/Objects365 val splits).
+- All results shown at 640×640.
+- Not all model variants were trained for the same number of epochs (so comparisons aren’t perfectly “fair”).
+- ReID is reported as Recall@K on a mixed set containing 399 IDs / 5736 person images.
 
+| Model | Params (M) | mAP50 Person | mAP50 Face | mAP50 Vehicle | mAP50 Pose | mAP50 Face KP | mAP50 Attr (main) | mAP50 Attr (color) | ReID R@K (1,10) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Yolo11l-dpar-250525 | 26.5 | 0.864 | 0.833 | 0.699 | 0.827 | 0.779 | 0.588 | 0.569 | 0.476, 0.792 |
+| [Yolo11l-dpar-210525](https://drive.google.com/file/d/15R2s1vqeKMmrqck7HMkzR7Bo_50z9e-o/view?usp=drive_link) | 26.5 | 0.856 | 0.823 | 0.695 | 0.826 | 0.779 | 0.585 | 0.556 | 0.256, 0.618 |
+| Yolo11l-dpa-210525 | 26.2 | 0.856 | 0.823 | 0.695 | 0.826 | 0.779 | 0.585 | 0.556 | 0.035, 0.117 |
+| [Yolo11l-dpa-131224](https://drive.google.com/file/d/1DwRpgS53MtQYM4G7Rm1K7OBxHhguaiI5/view?usp=drive_link) | 26.2 | 0.840 | 0.786 | 0.660 | 0.798 | 0.744 | 0.561 | 0.540 | — |
+| [Yolo11l-dp-291024](https://drive.google.com/file/d/1veVJ9y6Set3oIDtZ47_Zpz6cnYqyMauy/view?usp=drive_link) | 26.2 | 0.849 | 0.854 | 0.648 | 0.790 | 0.779 | — | — | — |
+| [yolo-dpa-s-21124](https://drive.google.com/file/d/1FUK6x26Z8Dz0gqw-20IHrvnUIKl8lLhk/view?usp=drive_link) | 10.1 | 0.818 | 0.755 | 0.556 | 0.757 | 0.741 | 0.500 | 0.477 | — |
+| [yolo-dpa-n-251224](https://drive.google.com/file/d/1YDbFnwfd_xvlm4kkRiXCs_FMCPPOTfXP/view?usp=drive_link) | 3.0 | 0.779 | 0.682 | 0.443 | 0.692 | 0.683 | 0.431 | 0.437 | — |
 
-  
+Note: some newer weights exist but aren’t all published/added to the table yet.
+
+## Quickstart (demo app)
+
+This repo includes a small demo viewer that:
+
+- opens a webcam or video file,
+- runs a DP/DPA model,
+- lets you click a person box to inspect attributes,
+- auto-downloads weights if missing.
+
+### Install
+
+```bash
+git clone git@github.com:ubonpartners/yolo-dpar.git
+cd yolo-dpar
+
+conda env create -f environment.yml
+conda activate yolo-dpar
+
+# missing from environment.yml (kept minimal on purpose)
+pip install opencv-python
+```
+
+### Run
+
+```bash
+# webcam
+python yolo-dpa-test.py --video webcam --model yolo-dpa-l
+
+# or an mp4 file
+python yolo-dpa-test.py --video /path/to/video.mp4 --model yolo-dpa-s
+```
+
+Supported demo models (auto-downloaded): `yolo-dpa-l`, `yolo-dp-l`, `yolo-dpa-s`, `yolo-dpa-n`.
+
+Controls:
+
+- Press `p` to pause.
+- Left-click a person box to highlight it (and show attributes).
+
+## Training (local, standalone)
+
+This repo includes a standalone local training script: `train.py`.
+
+It is adapted from the AzureML training code, but **removes Azure/MLflow dependencies** and runs purely locally via Ultralytics.
+
+### Requirements
+
+- You must use the **Ultralytics multilabel fork/branch** (see [Related repositories](#related-repositories)).
+- You need a working PyTorch + CUDA (or CPU) environment appropriate for your machine.
+
+### Config format
+
+Training is driven by a single YAML file with this shape:
+
+- `dataset`: an Ultralytics dataset config (train/val paths, `names`, optional `kpt_shape`, …)
+- `from_scratch` / `fine_tune` / `transfer` / `resume`: training parameter blocks
+
+See `data/train_example.yaml` for a ready-to-edit template.
+
+### Commands
+
+```bash
+# from scratch (writes a run-local model YAML with nc/kpt_shape set)
+python train.py --config data/train_example.yaml --mode from_scratch
+
+# fine-tune from a checkpoint
+python train.py --config data/train_example.yaml --mode fine_tune
+
+# transfer learning (freeze early layers)
+python train.py --config data/train_example.yaml --mode transfer
+
+# resume from the latest run under ./runs/
+python train.py --config data/train_example.yaml --mode resume
+
+# dry-run to inspect resolved paths/kwargs
+python train.py --config data/train_example.yaml --mode from_scratch --dry-run
+```
+
+## How it works (multi-label per box)
+
+The base is an Ultralytics YOLO pose model (YOLO26 / YOLO11/12), but attributes create a key problem:
+
+> Default YOLO postprocessing assumes **one class per box** (highest score wins), which is incompatible with “attributes” that should co-exist with `person`.
+
+So a small Ultralytics fork is used to support multi-label behavior (needed both during training and at inference/postprocess time).
+
+Two high-level inference strategies exist:
+
+- **(A) Expand-then-merge**: emit one detection per class above threshold (so you might see `person`, `person_male`, `person_has_hat`, …), then merge them later.
+- **(B) Fold-into-vector (preferred)**: suppress attribute-classes before NMS, then attach an attribute score vector to the surviving person detection.
+
+The current demo app follows approach (A). The model changes required for training/inference live in the `multilabel` fork/branch.
+
+ReID note:
+
+- Unlike Ultralytics’ feature-copy hook, DPAR uses a dedicated head (PoseReID-style) and outputs `reid_embeddings` directly in the inference results (valid for `person` boxes).
+
+## Related repositories
+
+- [Ultralytics fork](https://github.com/ubonpartners/ultralytics/tree/multilabel) (required `multilabel` branch)
+- [Dataset Processor](https://github.com/ubonpartners/dataset-processor) (dataset build + `map.py` evaluation)
+- [AzureML tools](https://github.com/ubonpartners/azureml) (training helpers)
+- [ReID adapter training](https://github.com/ubonpartners/reid) (adapter training + model fusion)
+- [Track](https://github.com/ubonpartners/track) (tracking + evaluation toolkit)
+
+## License
+
+This work is dual-licensed:
+
+- **AGPL** for **non-commercial use only**
+- **Ubon Cooperative License**: <https://github.com/ubonpartners/license/blob/main/LICENSE>
+
+The provided weights were trained using code derived from Ultralytics and are therefore subject to AGPL terms (and any additional dataset/model license terms).
+
+Contact: [bernandocribbenza@gmail.com](mailto:bernandocribbenza@gmail.com?subject=yolo-dpar%20question)

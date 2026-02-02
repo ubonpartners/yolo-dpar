@@ -1,0 +1,7 @@
+gdown
+opencv-python
+PyYAML
+numpy
+
+# Ultralytics fork with multi-label support (required for attributes-per-box).
+ultralytics @ git+https://github.com/ubonpartners/ultralytics.git@multilabel

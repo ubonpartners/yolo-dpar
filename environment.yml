@@ -3,9 +3,13 @@ channels:
   - pytorch
   - defaults
   - conda-forge
+  - nvidia
 dependencies:
   - python>=3.10
+  - pytorch>=2.4.0
+  - pytorch-cuda>=12.4
+  - torchvision>=0.8
+  - torchaudio
   - pip
   - pip:
-    - gdown
-    - git+https://github.com/cribbinsb/ultralytics.git@multilabel
+    - -r requirements.txt
