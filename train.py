@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -26,6 +27,12 @@ from typing import Any, Dict, Optional
 # If Comet is enabled via env var, import it *before* torch/ultralytics so Comet can
 # automatically hook into framework logging.
 if os.environ.get("COMET_API_KEY"):
+    # In some launchers (e.g. DDP wrappers), torch may already be imported before this
+    # script executes. If so, Comet's auto-logging can't hook cleanly and will warn.
+    # Disable Comet auto-logging in that case to silence the warning while still
+    # allowing Ultralytics' Comet callbacks (manual logging) to run.
+    if "torch" in sys.modules:
+        os.environ.setdefault("COMET_DISABLE_AUTO_LOGGING", "1")
     try:
         import comet_ml  # noqa: F401
     except Exception:
