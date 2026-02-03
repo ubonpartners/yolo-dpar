@@ -47,6 +47,7 @@ from_scratch:
   # Loss weights (Ultralytics fork specific; keep defaults if unsure)
   pose: 0.25
   attr: 5.0
+  # rle: 1.0  # (float) RLE loss gain for pose (Pose26 only); default 1.0
 
 fine_tune:
   weights: /mldata/models/yolo11l_base.pt
@@ -57,6 +58,7 @@ fine_tune:
   optimizer: auto
   pose: 0.25
   attr: 5.0
+  # rle: 1.0  # (float) RLE loss gain for pose (Pose26 only)
 
 transfer:
   weights: /mldata/models/yolo11l_base.pt
@@ -68,6 +70,7 @@ transfer:
   optimizer: auto
   pose: 0.25
   attr: 5.0
+  # rle: 1.0  # (float) RLE loss gain for pose (Pose26 only)
 
 resume:
   # Option A: explicitly set a checkpoint to resume from

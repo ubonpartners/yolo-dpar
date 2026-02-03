@@ -26,6 +26,7 @@ import torch
 import yaml
 import ultralytics
 from ultralytics import YOLO
+from ultralytics.utils import SETTINGS
 
 
 def _require_multilabel_ultralytics() -> None:
@@ -273,6 +274,23 @@ def main() -> None:
     run_dir = Path(args.project) / run_spec.name
     run_dir.mkdir(parents=True, exist_ok=True)
 
+    # Enable Comet logging iff COMET_API_KEY is set.
+    #
+    # Ultralytics' Comet callback uses:
+    #   comet_ml.start(project_name=os.getenv("COMET_PROJECT_NAME", args.project))
+    # We want the Comet *project* to match our run folder name, i.e. `run_spec.name`.
+    if os.environ.get("COMET_API_KEY"):
+        SETTINGS["comet"] = True
+        os.environ["COMET_PROJECT_NAME"] = run_spec.name
+        try:
+            import comet_ml
+
+            # `login()` is for auth/config; project is set later by `start(project_name=...)`.
+            if hasattr(comet_ml, "login"):
+                comet_ml.login()
+        except Exception as e:
+            print(f"[Comet] COMET_API_KEY set but Comet init failed; continuing without Comet. Error: {e}")
+
     dataset_path = _write_dataset_tmp(dataset_cfg, run_dir)
     model_source = _resolve_model_source(args.mode, train_cfg, dataset_cfg, run_dir)
 
@@ -301,6 +319,7 @@ def main() -> None:
     freeze = _get(train_cfg, "freeze", None)
     pose = _get(train_cfg, "pose", 0.25)
     attr = _get(train_cfg, "attr", 5.0)
+    rle = _get(train_cfg, "rle", 1.0)  # RLE loss gain (pose tasks; ultralytics default 1.0)
     patience = _get(train_cfg, "patience", 200)
     batch = int(_get(train_cfg, "batch", -1))
 
@@ -318,6 +337,7 @@ def main() -> None:
         device=device,
         pose=pose,
         attr=attr,
+        rle=rle,
     )
 
     if freeze is not None:
