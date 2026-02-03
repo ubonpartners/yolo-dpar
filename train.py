@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -134,7 +135,7 @@ def _make_model_source_from_scratch(train_cfg: Dict[str, Any], dataset_cfg: Dict
 
     Expected keys in train_cfg:
       - config: path to model YAML
-      - size: optional shorthand to inject into yolo11* filenames (kept for backward-compat)
+      - size: optional shorthand to inject into yolo{N}{size}* filenames (e.g. yolo11, yolo12, yolo26)
     """
     if "config" not in train_cfg:
         raise KeyError("from_scratch section must include 'config' (path to model YAML) or provide 'weights'")
@@ -152,10 +153,20 @@ def _make_model_source_from_scratch(train_cfg: Dict[str, Any], dataset_cfg: Dict
     model_name = model_cfg_path.name
     size = str(_get(train_cfg, "size", "")).strip()
     if size:
-        pos = model_name.find("yolo11")
-        if pos != -1:
-            pos += len("yolo11")
-            model_name = model_name[:pos] + size + model_name[pos:]
+        # Inject or replace the model size letter after the "yolo<digits>" prefix.
+        #
+        # Examples:
+        # - yolo26-pose.yaml + size=s -> yolo26s-pose.yaml
+        # - yolo11l-pose.yaml + size=s -> yolo11s-pose.yaml
+        # - yolo12n.yaml + size=n -> unchanged
+        m = re.match(r"^(yolo\\d+)([nslmx])?(.*)$", model_name)
+        if m:
+            prefix, existing_size, rest = m.group(1), m.group(2), m.group(3)
+            if existing_size:
+                if existing_size != size:
+                    model_name = f"{prefix}{size}{rest}"
+            else:
+                model_name = f"{prefix}{size}{rest}"
 
     out_dir.mkdir(parents=True, exist_ok=True)
     out_model_yaml = out_dir / model_name
