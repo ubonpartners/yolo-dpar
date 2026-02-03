@@ -267,7 +267,7 @@ def _auto_batch_and_device(model: YOLO, requested_batch: int, requested_device: 
             elif model_size == "n":
                 batch = int(batch * 3)
             elif model_size == "s":
-                batch = int(batch * 2)
+                batch = int((batch * 3)//2)
         device = [x for x in range(num_gpus)]
 
     batch = int(batch)
