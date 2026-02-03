@@ -43,7 +43,7 @@ import torch
 import yaml
 import ultralytics
 from ultralytics import YOLO
-from ultralytics.utils import SETTINGS
+from ultralytics.utils import RUNS_DIR, SETTINGS
 
 
 def _require_multilabel_ultralytics() -> None:
@@ -191,7 +191,13 @@ def _make_model_source_from_scratch(train_cfg: Dict[str, Any], dataset_cfg: Dict
     return str(out_model_yaml)
 
 
-def _resolve_model_source(mode: str, train_cfg: Dict[str, Any], dataset_cfg: Dict[str, Any], run_dir: Path) -> str:
+def _resolve_model_source(
+    mode: str,
+    train_cfg: Dict[str, Any],
+    dataset_cfg: Dict[str, Any],
+    run_dir: Path,
+    default_project_dir: str | Path,
+) -> str:
     """
     Resolve what to pass into `YOLO(...)`:
       - a `.pt` weights path, OR
@@ -203,7 +209,7 @@ def _resolve_model_source(mode: str, train_cfg: Dict[str, Any], dataset_cfg: Dic
             return str(train_cfg["weights"])
 
         # Find latest run under project and use its last.pt.
-        project = Path(str(_get(train_cfg, "project", "runs")))
+        project = Path(str(_get(train_cfg, "project", default_project_dir)))
         candidates = [p for p in project.glob("*") if p.is_dir()]
         if not candidates:
             raise FileNotFoundError(f"resume: no runs found under project folder '{project}'")
@@ -287,6 +293,18 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="print resolved config and exit")
     args = parser.parse_args()
 
+    # Normalize `--project` into an absolute directory under Ultralytics' RUNS_DIR.
+    #
+    # If we pass a relative `project`, Ultralytics will nest it under `RUNS_DIR/<task>/<project>`,
+    # e.g. RUNS_DIR/pose/runs/... which is often surprising.
+    #
+    # Expected:
+    #   /.../ultralytics/runs/<run_name>
+    # not:
+    #   /.../ultralytics/runs/pose/runs/<run_name>
+    if not Path(args.project).is_absolute():
+        args.project = str(RUNS_DIR) if args.project == "runs" else str(Path(RUNS_DIR) / args.project)
+
     os.environ["WANDB_MODE"] = "disabled"
     os.environ["NO_ALBUMENTATIONS_UPDATE"] = "1"
 
@@ -318,8 +336,14 @@ def main() -> None:
         except Exception as e:
             print(f"[Comet] COMET_API_KEY set but Comet init failed; continuing without Comet. Error: {e}")
 
-    dataset_path = _write_dataset_tmp(dataset_cfg, run_dir)
-    model_source = _resolve_model_source(args.mode, train_cfg, dataset_cfg, run_dir)
+    # Write a per-run copy for provenance, but pass a stable path to Ultralytics.
+    # Ultralytics resolves relative dataset paths relative to the dataset YAML location (yaml_file.parent),
+    # so if we write a new YAML path every run, it can invalidate label caches and trigger rescans.
+    _write_dataset_tmp(dataset_cfg, run_dir)
+
+    dataset_path = Path("/tmp/dataset.yml")
+    _dump_yaml(dataset_cfg, dataset_path)
+    model_source = _resolve_model_source(args.mode, train_cfg, dataset_cfg, run_dir, default_project_dir=args.project)
 
     if args.dry_run:
         print("Resolved training run:")
@@ -327,7 +351,7 @@ def main() -> None:
         print(f"  mode:     {args.mode}")
         print(f"  project:  {args.project}")
         print(f"  name:     {run_spec.name}")
-        print(f"  dataset:  {dataset_path}")
+        print(f"  dataset:  {dataset_path} (stable path)")
         print(f"  model:    {model_source}")
         print("  train_cfg:")
         print(train_cfg)
