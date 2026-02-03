@@ -23,6 +23,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+# If Comet is enabled via env var, import it *before* torch/ultralytics so Comet can
+# automatically hook into framework logging.
+if os.environ.get("COMET_API_KEY"):
+    try:
+        import comet_ml  # noqa: F401
+    except Exception:
+        # If Comet isn't installed/usable, training should still proceed.
+        pass
+
 import torch
 import yaml
 import ultralytics
