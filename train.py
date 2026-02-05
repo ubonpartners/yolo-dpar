@@ -151,7 +151,8 @@ def _make_model_source_from_scratch(train_cfg: Dict[str, Any], dataset_cfg: Dict
 
     Expected keys in train_cfg:
       - config: path to model YAML
-      - size: optional shorthand to inject into yolo{N}{size}* filenames (e.g. yolo11, yolo12, yolo26)
+      - size: optional shorthand that controls the *filename* passed to Ultralytics (n/s/m/l/x).
+              Ultralytics infers model scale from the size letter in the YAML filename.
     """
     if "config" not in train_cfg:
         raise KeyError("from_scratch section must include 'config' (path to model YAML) or provide 'weights'")
@@ -166,16 +167,21 @@ def _make_model_source_from_scratch(train_cfg: Dict[str, Any], dataset_cfg: Dict
     if "kpt_shape" in model_cfg and "kpt_shape" in dataset_cfg:
         model_cfg["kpt_shape"] = dataset_cfg["kpt_shape"]
 
+    # Match AzureML `run_train.py` behavior:
+    # - Load `config:` YAML contents
+    # - Write a run-local copy whose *filename* includes the size letter (if provided)
+    #   so Ultralytics can infer scale via `guess_model_scale()`.
     model_name = model_cfg_path.name
-    size = str(_get(train_cfg, "size", "")).strip()
+    size = str(_get(train_cfg, "size", "")).strip().lower()
     if size:
+        if size not in {"n", "s", "m", "l", "x"}:
+            raise ValueError(f"Invalid from_scratch.size '{size}'. Expected one of: n, s, m, l, x")
+
         # Inject or replace the model size letter after the "yolo<digits>" prefix.
         #
-        # Examples:
-        # - yolo26-pose.yaml + size=s -> yolo26s-pose.yaml
-        # - yolo11l-pose.yaml + size=s -> yolo11s-pose.yaml
-        # - yolo12n.yaml + size=n -> unchanged
-        m = re.match(r"^(yolo\\d+)([nslmx])?(.*)$", model_name)
+        # IMPORTANT: This must match Ultralytics' `guess_model_scale()` expectations, e.g.
+        #   yolo11l-pose.yaml -> scale 'l'
+        m = re.match(r"^(yolo\d+)([nslmx])?(.*)$", model_name)
         if m:
             prefix, existing_size, rest = m.group(1), m.group(2), m.group(3)
             if existing_size:
@@ -183,6 +189,11 @@ def _make_model_source_from_scratch(train_cfg: Dict[str, Any], dataset_cfg: Dict
                     model_name = f"{prefix}{size}{rest}"
             else:
                 model_name = f"{prefix}{size}{rest}"
+        else:
+            print(
+                f"[warn] from_scratch.size='{size}' was set, but could not infer where to inject it "
+                f"from config filename '{model_cfg_path.name}'. Ultralytics may default to the first scale."
+            )
 
     out_dir.mkdir(parents=True, exist_ok=True)
     out_model_yaml = out_dir / model_name

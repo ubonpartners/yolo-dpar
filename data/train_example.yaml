@@ -32,10 +32,11 @@ dataset:
 from_scratch:
   # Path to a model YAML (architecture). The script will set `nc` (and `kpt_shape` if present)
   # and write a modified copy under runs/<name>/.
-  config: /mldata/config/models/yolo11l-pose.yaml
+  # Tip: use the "base" YAML without a size letter, and set `size:` below.
+  config: /mldata/config/models/yolo11-pose.yaml
 
-  # Optional shorthand injected into filenames that contain "yolo11".
-  # This exists for backwards-compat with older naming conventions.
+  # Size letter that will be injected into the run-local YAML filename (n/s/m/l/x).
+  # Ultralytics infers model scale from the size letter in the YAML filename.
   size: l
 
   epochs: 100
