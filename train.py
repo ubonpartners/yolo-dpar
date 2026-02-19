@@ -9,6 +9,8 @@ It keeps the original "one YAML config drives everything" pattern:
 
   - `dataset`: Ultralytics-style dataset config (train/val paths, names, kpt_shape, ...)
   - `from_scratch` / `fine_tune` / `transfer` / `resume`: sections containing training params
+  - `end2end`: optional (true/false, default false) in mode sections; controls end-to-end
+    NMS-free detection head (YOLO26/YOLOv10 style). In from_scratch, written to model YAML.
 
 See `data/train_example.yaml` for a template.
 """
@@ -166,6 +168,10 @@ def _make_model_source_from_scratch(train_cfg: Dict[str, Any], dataset_cfg: Dict
     model_cfg["nc"] = len(dataset_cfg["names"])
     if "kpt_shape" in model_cfg and "kpt_shape" in dataset_cfg:
         model_cfg["kpt_shape"] = dataset_cfg["kpt_shape"]
+
+    # end2end: whether to use end-to-end detection head (YOLO26, YOLOv10 style).
+    # Set in model YAML so Ultralytics builds the correct architecture (one2one matcher, E2ELoss).
+    model_cfg["end2end"] = bool(_get(train_cfg, "end2end", False))
 
     # Match AzureML `run_train.py` behavior:
     # - Load `config:` YAML contents
@@ -370,6 +376,14 @@ def main() -> None:
 
     model = YOLO(model_source)
 
+    # When loading from weights (fine_tune/transfer/resume), optionally override end2end
+    # from the config. For from_scratch, end2end is already set in the model YAML.
+    if args.mode in ("fine_tune", "transfer", "resume") and "end2end" in train_cfg:
+        inner = getattr(model, "model", None)
+        if inner is not None and hasattr(inner, "end2end"):
+            inner.end2end = bool(train_cfg["end2end"])
+            print(f"Overriding model end2end to {inner.end2end} (from config)")
+
     if "merge-weights" in train_cfg:
         merge_weights_from(model, str(train_cfg["merge-weights"]))
 
@@ -401,6 +415,9 @@ def main() -> None:
         attr=attr,
         rle=rle,
     )
+
+    if "end2end" in train_cfg:
+        train_kwargs["end2end"] = bool(train_cfg["end2end"])
 
     if freeze is not None:
         train_kwargs["freeze"] = freeze

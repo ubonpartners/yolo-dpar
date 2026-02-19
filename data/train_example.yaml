@@ -39,6 +39,11 @@ from_scratch:
   # Ultralytics infers model scale from the size letter in the YAML filename.
   size: l
 
+  # end2end: whether to use end-to-end NMS-free detection (YOLO26/YOLOv10 style).
+  # Default false. Set true for one2one matcher / E2ELoss; false for standard NMS path.
+  # Affects multi-label/attribute outputs; see CONVERSION.md in ultralytics for compatibility.
+  # end2end: false
+
   epochs: 100
   imgsz: 640
   batch: -1
@@ -52,6 +57,7 @@ from_scratch:
 
 fine_tune:
   weights: /mldata/models/yolo11l_base.pt
+  # end2end: false  # optional override when loading from weights
   epochs: 50
   imgsz: 640
   batch: -1
@@ -64,6 +70,7 @@ fine_tune:
 transfer:
   weights: /mldata/models/yolo11l_base.pt
   freeze: 10
+  # end2end: false  # optional override when loading from weights
   epochs: 50
   imgsz: 640
   batch: -1
