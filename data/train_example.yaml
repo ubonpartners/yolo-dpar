@@ -1,0 +1,88 @@
+#
+# YOLO-DPAR training config template.
+#
+# This follows the same structure as the original AzureML training config:
+# - `dataset`: an Ultralytics dataset YAML (embedded here as a dict)
+# - `from_scratch` / `fine_tune` / `transfer` / `resume`: training parameter blocks
+#
+# Notes:
+# - Paths below are placeholders. Replace with your local dataset/model paths.
+# - `names` and `kpt_shape` must match your labels.
+#
+
+dataset:
+  # Ultralytics dataset config format
+  #
+  # You can either use a single folder with train/val subfolders, or explicit paths.
+  # Example (explicit):
+  # train: /data/myset/train/images
+  # val:   /data/myset/val/images
+  #
+  train: /mldata/output_datasets/my_dataset/train/images
+  val: /mldata/output_datasets/my_dataset/val/images
+
+  # Class names (order defines class indices).
+  names: [person, face, vehicle, animal, weapon]
+
+  # Keypoint shape for pose models: [num_keypoints, dims]
+  # - COCO person pose: [17, 3]
+  # - face 5pt: [5, 3]
+  kpt_shape: [17, 3]
+
+from_scratch:
+  # Path to a model YAML (architecture). The script will set `nc` (and `kpt_shape` if present)
+  # and write a modified copy under runs/<name>/.
+  # Tip: use the "base" YAML without a size letter, and set `size:` below.
+  config: /mldata/config/models/yolo11-pose.yaml
+
+  # Size letter that will be injected into the run-local YAML filename (n/s/m/l/x).
+  # Ultralytics infers model scale from the size letter in the YAML filename.
+  size: l
+
+  # end2end: whether to use end-to-end NMS-free detection (YOLO26/YOLOv10 style).
+  # Default false. Set true for one2one matcher / E2ELoss; false for standard NMS path.
+  # Affects multi-label/attribute outputs; see CONVERSION.md in ultralytics for compatibility.
+  # end2end: false
+
+  epochs: 100
+  imgsz: 640
+  batch: -1
+  lr0: 0.01
+  optimizer: auto
+
+  # Loss weights (Ultralytics fork specific; keep defaults if unsure)
+  pose: 0.25
+  attr: 5.0
+  # rle: 1.0  # (float) RLE loss gain for pose (Pose26 only); default 1.0
+
+fine_tune:
+  weights: /mldata/models/yolo11l_base.pt
+  # end2end: false  # optional override when loading from weights
+  epochs: 50
+  imgsz: 640
+  batch: -1
+  lr0: 0.001
+  optimizer: auto
+  pose: 0.25
+  attr: 5.0
+  # rle: 1.0  # (float) RLE loss gain for pose (Pose26 only)
+
+transfer:
+  weights: /mldata/models/yolo11l_base.pt
+  freeze: 10
+  # end2end: false  # optional override when loading from weights
+  epochs: 50
+  imgsz: 640
+  batch: -1
+  lr0: 0.001
+  optimizer: auto
+  pose: 0.25
+  attr: 5.0
+  # rle: 1.0  # (float) RLE loss gain for pose (Pose26 only)
+
+resume:
+  # Option A: explicitly set a checkpoint to resume from
+  # weights: runs/<previous_run>/weights/last.pt
+  #
+  # Option B (default): leave this section empty and the script will pick the most recent run under `project`.
+  project: runs

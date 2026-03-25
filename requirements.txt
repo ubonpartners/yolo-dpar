@@ -1,0 +1,6 @@
+opencv-python
+PyYAML
+numpy
+
+# Ultralytics fork with attribute head and ReID support (required).
+ultralytics @ git+https://github.com/ubonpartners/ultralytics.git@ubon26
