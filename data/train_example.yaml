@@ -55,6 +55,10 @@ from_scratch:
   attr: 5.0
   # rle: 1.0  # (float) RLE loss gain for pose (Pose26 only); default 1.0
 
+  # torch.compile: false (default), true, or a mode string ("reduce-overhead", "max-autotune").
+  # Compiles the model forward pass for faster training, especially on modern GPUs (RTX 5090, H100).
+  # compile: false
+
 fine_tune:
   weights: /mldata/models/yolo11l_base.pt
   # end2end: false  # optional override when loading from weights
@@ -66,6 +70,7 @@ fine_tune:
   pose: 0.25
   attr: 5.0
   # rle: 1.0  # (float) RLE loss gain for pose (Pose26 only)
+  # compile: false  # torch.compile (false/true/"reduce-overhead"/"max-autotune")
 
 transfer:
   weights: /mldata/models/yolo11l_base.pt
@@ -79,6 +84,7 @@ transfer:
   pose: 0.25
   attr: 5.0
   # rle: 1.0  # (float) RLE loss gain for pose (Pose26 only)
+  # compile: false  # torch.compile (false/true/"reduce-overhead"/"max-autotune")
 
 resume:
   # Option A: explicitly set a checkpoint to resume from

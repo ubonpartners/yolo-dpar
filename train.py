@@ -577,6 +577,7 @@ def main() -> None:
     pose = _get(train_cfg, "pose", 0.25)
     attr = _get(train_cfg, "attr", 5.0)
     rle = _get(train_cfg, "rle", 1.0)  # RLE loss gain (pose tasks; ultralytics default 1.0)
+    compile_mode = _get(train_cfg, "compile", False)  # torch.compile: False, True, or mode string
     patience = _get(train_cfg, "patience", 200)
     batch = int(_get(train_cfg, "batch", -1))
 
@@ -595,6 +596,7 @@ def main() -> None:
         pose=pose,
         attr=attr,
         rle=rle,
+        compile=compile_mode,
     )
 
     train_kwargs["warmup_bias_lr"] = 0.0
