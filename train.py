@@ -41,9 +41,21 @@ if os.environ.get("COMET_API_KEY"):
         # If Comet isn't installed/usable, training should still proceed.
         pass
 
+import warnings
+
 import torch
 import torch.nn as nn
 import yaml
+
+# Allow TF32 for fp32 matmul operations (Linear layers, loss computations, optimizer step).
+# cuDNN convolutions already use TF32 by default; this extends it to matmul.
+# Negligible precision impact for training; meaningful throughput gain on Ampere/Blackwell.
+torch.set_float32_matmul_precision("high")
+
+# Suppress FutureWarning spam from torch._inductor internals during torch.compile.
+# torch/_inductor/lowering.py still uses the deprecated torch._prims_common.check API;
+# this will be fixed in a future PyTorch release.
+warnings.filterwarnings("ignore", category=FutureWarning, module=r"torch\._inductor")
 import ultralytics
 from ultralytics import YOLO
 from ultralytics.utils import RUNS_DIR, SETTINGS
