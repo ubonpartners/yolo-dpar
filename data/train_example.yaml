@@ -55,8 +55,10 @@ from_scratch:
   attr: 5.0
   # rle: 1.0  # (float) RLE loss gain for pose (Pose26 only); default 1.0
 
-  # torch.compile: false (default), true, or a mode string ("reduce-overhead", "max-autotune").
-  # Compiles the model forward pass for faster training, especially on modern GPUs (RTX 5090, H100).
+  # torch.compile: false (default), true, or a mode string:
+  #   "reduce-overhead"        — CUDA graphs, best when CPU launch overhead dominates (fast GPUs)
+  #   "max-autotune"           — exhaustive kernel search, no CUDA graphs (DDP-safe default)
+  #   "max-autotune-override"  — exhaustive kernel search + CUDA graphs (requires PyTorch 2.x DDPOptimizer)
   # compile: false
 
 fine_tune:
@@ -91,4 +93,6 @@ resume:
   # weights: runs/<previous_run>/weights/last.pt
   #
   # Option B (default): leave this section empty and the script will pick the most recent run under `project`.
+  # Any additional keys here (e.g. pose/attr/rle/lr0/optimizer/epochs/...) are treated as
+  # resume-time overrides and patched into checkpoint train args before resume starts.
   project: runs

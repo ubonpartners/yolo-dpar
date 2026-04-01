@@ -352,23 +352,66 @@ def _resolve_model_source(
         if "weights" in train_cfg:
             return str(train_cfg["weights"])
 
-        # Find latest run under project and use its last.pt.
-        project = Path(str(_get(train_cfg, "project", default_project_dir)))
-        candidates = [p for p in project.glob("*") if p.is_dir()]
-        if not candidates:
-            raise FileNotFoundError(f"resume: no runs found under project folder '{project}'")
-        latest = max(candidates, key=lambda p: p.stat().st_ctime)
-        weights = latest / "weights" / "last.pt"
-        if not weights.is_file():
-            raise FileNotFoundError(f"resume: expected weights at '{weights}' but file not found")
-        print(f"Resuming from latest weights {weights}")
-        return str(weights)
+        # Find the newest actual checkpoint under project.
+        # Using run-dir timestamps is fragile because this script creates a new run folder
+        # before resolving resume source, which can make "latest run" point to an empty dir.
+        project = Path(str(_get(train_cfg, "project", default_project_dir))).expanduser()
+        checkpoints = [p for p in project.glob("*/weights/last.pt") if p.is_file()]
+        if not checkpoints:
+            raise FileNotFoundError(
+                f"resume: no checkpoints found under '{project}'. "
+                "Expected at least one '<run>/weights/last.pt'."
+            )
+        latest = max(checkpoints, key=lambda p: p.stat().st_mtime)
+        print(f"Resuming from latest checkpoint {latest}")
+        return str(latest)
 
     if "weights" in train_cfg:
         return str(train_cfg["weights"])
 
     # from scratch: build a model YAML that matches dataset classes/keypoints
     return _make_model_source_from_scratch(train_cfg, dataset_cfg, run_dir)
+
+
+def _apply_resume_overrides_to_checkpoint(weights_path: str | Path, train_cfg: Dict[str, Any], run_dir: Path) -> str:
+    """
+    If resume config includes train-arg overrides (pose/rle/attr/etc), patch them into
+    checkpoint metadata and return the patched checkpoint path.
+
+    We intentionally do not mutate the source checkpoint in-place.
+    """
+    control_keys = {"weights", "project"}
+    overrides = {k: v for k, v in train_cfg.items() if k not in control_keys}
+    if not overrides:
+        return str(weights_path)
+
+    src = Path(weights_path)
+    if not src.is_file():
+        raise FileNotFoundError(f"resume: checkpoint not found at '{src}'")
+
+    ckpt = torch.load(src, map_location="cpu")
+
+    patched_fields = 0
+    for field in ("train_args", "args"):
+        payload = ckpt.get(field)
+        if isinstance(payload, dict):
+            payload.update(overrides)
+            patched_fields += 1
+
+    # Some checkpoints may only have one of the above. Ensure train_args exists at minimum.
+    if not isinstance(ckpt.get("train_args"), dict):
+        ckpt["train_args"] = dict(overrides)
+        patched_fields += 1
+
+    out = run_dir / f"{src.stem}_resume_overrides.pt"
+    torch.save(ckpt, out)
+    print(
+        f"resume overrides applied to checkpoint metadata ({patched_fields} field(s)): "
+        f"{sorted(overrides.keys())}\n"
+        f"  source: {src}\n"
+        f"  patched: {out}"
+    )
+    return str(out)
 
 
 def _auto_batch_and_device(model: YOLO, requested_batch: int, requested_device: str) -> tuple[int, Any]:
@@ -511,6 +554,9 @@ def main() -> None:
         print("  train_cfg:")
         print(train_cfg)
         return
+
+    if args.mode == "resume":
+        model_source = _apply_resume_overrides_to_checkpoint(model_source, train_cfg, run_dir)
 
     model = YOLO(model_source)
 
