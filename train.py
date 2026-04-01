@@ -21,6 +21,7 @@ import argparse
 import os
 import sys
 import re
+import pickle
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -389,7 +390,19 @@ def _apply_resume_overrides_to_checkpoint(weights_path: str | Path, train_cfg: D
     if not src.is_file():
         raise FileNotFoundError(f"resume: checkpoint not found at '{src}'")
 
-    ckpt = torch.load(src, map_location="cpu")
+    try:
+        ckpt = torch.load(src, map_location="cpu")
+    except pickle.UnpicklingError as e:
+        # PyTorch 2.6 defaults torch.load(..., weights_only=True), which cannot load
+        # full Ultralytics checkpoints containing model classes. For trusted local
+        # checkpoints, retry with weights_only=False so we can patch train_args/args.
+        if "Weights only load failed" not in str(e):
+            raise
+        print(
+            "resume: torch.load failed with weights_only=True default; "
+            "retrying with weights_only=False for trusted checkpoint metadata patching."
+        )
+        ckpt = torch.load(src, map_location="cpu", weights_only=False)
 
     patched_fields = 0
     for field in ("train_args", "args"):
