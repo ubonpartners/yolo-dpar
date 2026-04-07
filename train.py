@@ -21,7 +21,6 @@ import argparse
 import os
 import sys
 import re
-import pickle
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -353,9 +352,9 @@ def _resolve_model_source(
         if "weights" in train_cfg:
             return str(train_cfg["weights"])
 
-        # Find the newest actual checkpoint under project.
-        # Using run-dir timestamps is fragile because this script creates a new run folder
-        # before resolving resume source, which can make "latest run" point to an empty dir.
+        # Find candidate checkpoints under project and prefer the most recently-updated
+        # unfinished run (epoch < total epochs). This avoids accidentally resuming a
+        # completed short run and triggering Ultralytics "fine-tune extra epochs".
         project = Path(str(_get(train_cfg, "project", default_project_dir))).expanduser()
         checkpoints = [p for p in project.glob("*/weights/last.pt") if p.is_file()]
         if not checkpoints:
@@ -363,8 +362,46 @@ def _resolve_model_source(
                 f"resume: no checkpoints found under '{project}'. "
                 "Expected at least one '<run>/weights/last.pt'."
             )
+        def _checkpoint_progress(path: Path) -> tuple[int, Optional[int]]:
+            try:
+                try:
+                    ckpt = torch.load(path, map_location="cpu")
+                except Exception:
+                    ckpt = torch.load(path, map_location="cpu", weights_only=False)
+            except Exception as e:
+                print(f"[warn] Could not inspect checkpoint progress for {path}: {e}")
+                return (-1, None)
+            epoch = int(ckpt.get("epoch", -1))
+            train_args = ckpt.get("train_args") or ckpt.get("args") or {}
+            total_epochs = None
+            if isinstance(train_args, dict) and "epochs" in train_args:
+                try:
+                    total_epochs = int(train_args["epochs"])
+                except Exception:
+                    total_epochs = None
+            return epoch, total_epochs
+
+        unfinished: list[Path] = []
+        for p in checkpoints:
+            epoch, total_epochs = _checkpoint_progress(p)
+            if total_epochs is not None and epoch >= 0 and (epoch + 1) < total_epochs:
+                unfinished.append(p)
+
+        if unfinished:
+            latest_unfinished = max(unfinished, key=lambda p: p.stat().st_mtime)
+            epoch, total_epochs = _checkpoint_progress(latest_unfinished)
+            print(
+                f"Resuming from latest unfinished checkpoint {latest_unfinished} "
+                f"(epoch={epoch}, total_epochs={total_epochs})"
+            )
+            return str(latest_unfinished)
+
         latest = max(checkpoints, key=lambda p: p.stat().st_mtime)
-        print(f"Resuming from latest checkpoint {latest}")
+        epoch, total_epochs = _checkpoint_progress(latest)
+        print(
+            f"[warn] No unfinished checkpoints found under '{project}'. "
+            f"Using latest checkpoint {latest} (epoch={epoch}, total_epochs={total_epochs})."
+        )
         return str(latest)
 
     if "weights" in train_cfg:
@@ -372,59 +409,6 @@ def _resolve_model_source(
 
     # from scratch: build a model YAML that matches dataset classes/keypoints
     return _make_model_source_from_scratch(train_cfg, dataset_cfg, run_dir)
-
-
-def _apply_resume_overrides_to_checkpoint(weights_path: str | Path, train_cfg: Dict[str, Any], run_dir: Path) -> str:
-    """
-    If resume config includes train-arg overrides (pose/rle/attr/etc), patch them into
-    checkpoint metadata and return the patched checkpoint path.
-
-    We intentionally do not mutate the source checkpoint in-place.
-    """
-    control_keys = {"weights", "project"}
-    overrides = {k: v for k, v in train_cfg.items() if k not in control_keys}
-    if not overrides:
-        return str(weights_path)
-
-    src = Path(weights_path)
-    if not src.is_file():
-        raise FileNotFoundError(f"resume: checkpoint not found at '{src}'")
-
-    try:
-        ckpt = torch.load(src, map_location="cpu")
-    except pickle.UnpicklingError as e:
-        # PyTorch 2.6 defaults torch.load(..., weights_only=True), which cannot load
-        # full Ultralytics checkpoints containing model classes. For trusted local
-        # checkpoints, retry with weights_only=False so we can patch train_args/args.
-        if "Weights only load failed" not in str(e):
-            raise
-        print(
-            "resume: torch.load failed with weights_only=True default; "
-            "retrying with weights_only=False for trusted checkpoint metadata patching."
-        )
-        ckpt = torch.load(src, map_location="cpu", weights_only=False)
-
-    patched_fields = 0
-    for field in ("train_args", "args"):
-        payload = ckpt.get(field)
-        if isinstance(payload, dict):
-            payload.update(overrides)
-            patched_fields += 1
-
-    # Some checkpoints may only have one of the above. Ensure train_args exists at minimum.
-    if not isinstance(ckpt.get("train_args"), dict):
-        ckpt["train_args"] = dict(overrides)
-        patched_fields += 1
-
-    out = run_dir / f"{src.stem}_resume_overrides.pt"
-    torch.save(ckpt, out)
-    print(
-        f"resume overrides applied to checkpoint metadata ({patched_fields} field(s)): "
-        f"{sorted(overrides.keys())}\n"
-        f"  source: {src}\n"
-        f"  patched: {out}"
-    )
-    return str(out)
 
 
 def _auto_batch_and_device(model: YOLO, requested_batch: int, requested_device: str) -> tuple[int, Any]:
@@ -568,14 +552,18 @@ def main() -> None:
         print(train_cfg)
         return
 
-    if args.mode == "resume":
-        model_source = _apply_resume_overrides_to_checkpoint(model_source, train_cfg, run_dir)
-
     model = YOLO(model_source)
 
-    # When loading from weights (fine_tune/transfer/resume), optionally override end2end
+    # Resume should behave exactly like stock Ultralytics resume from checkpoint args.
+    # Do not run custom setup that could alter semantics.
+    if args.mode == "resume":
+        print(f"Training with kwargs:\n  - resume: True")
+        model.train(resume=True)
+        return
+
+    # When loading from weights (fine_tune/transfer), optionally override end2end
     # from the config. For from_scratch, end2end is already set in the model YAML.
-    if args.mode in ("fine_tune", "transfer", "resume") and "end2end" in train_cfg:
+    if args.mode in ("fine_tune", "transfer") and "end2end" in train_cfg:
         inner = getattr(model, "model", None)
         if inner is not None and hasattr(inner, "end2end"):
             inner.end2end = bool(train_cfg["end2end"])
@@ -690,13 +678,9 @@ def main() -> None:
         else:
             print(f"backbone_lr_scale={backbone_lr_scale} — backbone/neck layers will use lr * {backbone_lr_scale}")
 
-    # resume is a special flag in Ultralytics
-    if args.mode == "resume":
-        train_kwargs = dict(data=str(dataset_path), resume=True)
-    else:
-        # for fine-tune / transfer / scratch, keep optimizer/lr0 explicit
-        train_kwargs["optimizer"] = optimizer
-        train_kwargs["lr0"] = lr0
+    # for fine-tune / transfer / scratch, keep optimizer/lr0 explicit
+    train_kwargs["optimizer"] = optimizer
+    train_kwargs["lr0"] = lr0
 
     print("Training with kwargs:")
     for k in sorted(train_kwargs.keys()):

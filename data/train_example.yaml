@@ -93,6 +93,6 @@ resume:
   # weights: runs/<previous_run>/weights/last.pt
   #
   # Option B (default): leave this section empty and the script will pick the most recent run under `project`.
-  # Any additional keys here (e.g. pose/attr/rle/lr0/optimizer/epochs/...) are treated as
-  # resume-time overrides and patched into checkpoint train args before resume starts.
+  # Resume uses stock Ultralytics semantics from checkpoint metadata.
+  # Do not set train hyperparameters here.
   project: runs
