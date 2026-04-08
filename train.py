@@ -84,6 +84,40 @@ def _get(cfg: Dict[str, Any], key: str, default: Any) -> Any:
     return cfg[key] if key in cfg else default
 
 
+def _normalize_val_subsample(dataset_cfg: Dict[str, Any]) -> None:
+    """
+    Normalize optional `val_subsample` into Ultralytics' expected `subsample` key.
+
+    Ultralytics applies `subsample` only for validation dataloaders (`mode == "val"`),
+    so this keeps train behavior unchanged while allowing clearer config naming.
+    """
+    if "val_subsample" not in dataset_cfg:
+        return
+
+    raw = dataset_cfg["val_subsample"]
+    try:
+        val_subsample = int(raw)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"dataset.val_subsample must be an integer >= 1, got {raw!r}") from e
+    if val_subsample < 1:
+        raise ValueError(f"dataset.val_subsample must be >= 1, got {val_subsample}")
+
+    existing = dataset_cfg.get("subsample", None)
+    existing_int = None
+    if existing is not None:
+        try:
+            existing_int = int(existing)
+        except (TypeError, ValueError):
+            existing_int = None
+    if existing is not None and existing_int != val_subsample:
+        print(
+            "[warn] dataset.val_subsample overrides dataset.subsample "
+            f"({existing} -> {val_subsample}) for validation subsampling."
+        )
+
+    dataset_cfg["subsample"] = val_subsample
+
+
 def merge_weights_from(model_base: YOLO, merge_from: str) -> None:
     """
     Merge weights from `merge_from` into `model_base` (best-effort).
@@ -497,6 +531,7 @@ def main() -> None:
         raise KeyError("Config must include a 'dataset' mapping (Ultralytics dataset config)")
 
     dataset_cfg = cfg["dataset"].copy()
+    _normalize_val_subsample(dataset_cfg)
     # If dataset has a path to a dir, merge in attributes/attr_nc/attr_label_format from dataset.yaml there (v10 format)
     path = dataset_cfg.get("path")
     if path and Path(path).is_dir():

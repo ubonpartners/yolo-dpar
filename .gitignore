@@ -1,2 +1,35 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments and local env files
+.venv/
+venv/
+env/
+.env
+.env.*
+
+# Build/tooling leftovers
+build/
+dist/
+*.egg-info/
+CMakeFiles/
+CMakeCache.txt
+
+# Training outputs and local artifacts
+runs/
+wandb/
+*.pt
+*.onnx
+*.engine
+
+# Local one-off train configs (keep canonical configs in data/)
+train_*.yaml
+
+# Keep legacy explicit ignores
 other/__pycache__
 yolo-dpa-l.pt

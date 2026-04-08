@@ -20,6 +20,8 @@ dataset:
   #
   train: /mldata/output_datasets/my_dataset/train/images
   val: /mldata/output_datasets/my_dataset/val/images
+  # Optional: keep every Nth validation image (1 = use all).
+  # val_subsample: 5
 
   # Class names (order defines class indices).
   names: [person, face, vehicle, animal, weapon]
