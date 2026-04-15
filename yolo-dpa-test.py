@@ -96,8 +96,8 @@ def do_video(model_path, video):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--model", default="models/yolo26l-v10-240226.pt",
-                        help="Path to YOLO .pt model (default: models/yolo26l-v10-240226.pt)")
+    parser.add_argument("--model", default="models/yolo26l-e2e-v10r-080426.pt",
+                        help="Path to YOLO .pt model (default: models/yolo26l-e2e-v10r-080426.pt)")
     parser.add_argument("--video", default="webcam",
                         help="Video source: 'webcam' or path to an mp4 file")
     opt = parser.parse_args()
