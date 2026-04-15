@@ -133,9 +133,9 @@ The ReID-capable models in this repository were trained with the [Ubon synthetic
 
 Comparison on two validation queries from the Ubon synthetic-reid dataset:
 
-- **Left column (`yolo26l.pt`)** uses default YOLO `feats` as the ReID baseline and has the weakest retrieval quality.
-- **Middle column (`yolo26l-v10-240226.pt`)** is the YOLO26L + attributes (DPA) model and is already significantly better, showing that attribute training improves person discrimination.
-- **Right column (`yolo26l-e2e-v10r-080426.pt`)** is the YOLO26L + attributes + trained ReID (DPAR) model and gives the strongest retrieval quality across both queries.
+- **Left column** uses stock YOLO26L `feats` as the ReID baseline (not one of the packaged checkpoints) and has the weakest retrieval quality.
+- **Middle column (`yolo26l-v10r-240226.pt`)** is the non-E2E YOLO26L DPAR checkpoint and is significantly better.
+- **Right column (`yolo26l-e2e-v10r-080426.pt`)** is the E2E YOLO26L DPAR checkpoint and gives the strongest retrieval quality across both queries.
 
 In each panel, the **top-left cell is the query image**, and the remaining cells are the **top-15 matches by cosine similarity** on the ReID vector.
 In the retrieval visualization, **green** boxes indicate correct matches and **blue** boxes indicate incorrect matches.
@@ -171,16 +171,16 @@ pip install -e .
 cd ../yolo-dpar
 ```
 
-Model weights are in `models/` via Git LFS and are pulled automatically with `git clone`.
+Model weights are in `models/` via Git LFS. Ensure Git LFS is installed; if weights are still pointers after clone, run `git lfs pull`.
 
 ```bash
-# webcam (default: yolo26l)
+# webcam (default: models/yolo26l-e2e-v10r-080426.pt)
 python yolo-dpa-test.py --video webcam
 
 # video file
-python yolo-dpa-test.py --video /path/to/video.mp4 --model models/yolo26s-v10-210226.pt
-python yolo-dpa-test.py --video /path/to/video.mp4 --model models/yolo26n-v10-030426.pt  # fastest
-python yolo-dpa-test.py --video /path/to/video.mp4 --model models/yolo11l-v10r-210825.pt  # with ReID
+python yolo-dpa-test.py --video /path/to/video.mp4 --model models/yolo26s-e2e-v10-100426.pt
+python yolo-dpa-test.py --video /path/to/video.mp4 --model models/yolo26n-e2e-v10-050426.pt  # fastest
+python yolo-dpa-test.py --video /path/to/video.mp4 --model models/yolo26s-e2e-v10r-100426.pt  # with ReID
 ```
 
 Controls: press `p` to pause; left-click a person box to highlight it and show attributes.
