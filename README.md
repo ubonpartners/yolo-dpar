@@ -154,12 +154,21 @@ In the tracking pipeline, FIQA gates which face crops are worth passing to the (
 
 This repo includes a small demo viewer that opens a webcam or video file, runs a DPA/DPAR model, and lets you click a person box to inspect attributes.
 
+**IMPORTANT: The demo app requires the `ubon26` branch from [https://github.com/ubonpartners/ultralytics](https://github.com/ubonpartners/ultralytics/tree/ubon26). If you install upstream `ultralytics` (or any other branch), the demo will not work.**
+
 ```bash
 git clone git@github.com:ubonpartners/yolo-dpar.git
 cd yolo-dpar
 
 conda env create -f environment.yml
 conda activate yolo-dpar
+
+# required: install Ubon Ultralytics fork on branch ubon26
+git clone https://github.com/ubonpartners/ultralytics.git ../ultralytics-ubon26
+cd ../ultralytics-ubon26
+git checkout ubon26
+pip install -e .
+cd ../yolo-dpar
 ```
 
 Model weights are in `models/` via Git LFS and are pulled automatically with `git clone`.
