@@ -75,23 +75,16 @@ Evaluation notes:
 - Metrics are a geometric mean over 11 validation sets (COCO, OpenImages, Objects365 splits + internal sets).
 - All results at 640×640 input.
 - "L" suffix on a metric means large-object subset only (e.g. PoseL = pose mAP for person boxes ≥ 96×96 px).
+- The table includes an `End2End` column plus ReID `Rank-1` and `ReID mAP` columns.
+- ReID scores are reported from the validation subset of the [Ubon synthetic-reid dataset](https://github.com/ubonpartners/synthetic-reid).
 
-| Model | Params (M) | GFLOPs | Person | Face | Vehicle | Pose (L) | Face KP (L) | Attr Main | Attr Color Top | Attr Color Bot | Weapon | Threat | FIQA |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| yolo11l-v10r-210825 (**DPAR**, with ReID) | 26.4 | 93.9 | 0.885 | 0.854 | 0.750 | 0.873 | 0.775 | 0.493 | 0.561 | 0.391 | 0.808 | 0.643 | 0.644 |
-| yolo26l-v10r-240226 | 26.7 | 96.7 | 0.884 | 0.864 | 0.746 | 0.890 | 0.771 | 0.512 | 0.580 | 0.402 | 0.841 | 0.680 | 0.653 |
-| yolo26l-e2e-v10r-080426 | 29.7 | 113.0 | 0.879 | 0.878 | 0.743 | 0.886 | 0.771 | 0.498 | 0.578 | 0.403 | 0.825 | 0.678 | 0.638 |
-| yolo26s-v10-030426-80 | 10.8 | 25.7 | 0.873 | 0.858 | 0.700 | 0.876 | 0.765 | 0.403 | 0.477 | 0.359 | 0.765 | 0.611 | 0.599 |
-| yolo26s-v10-210226 | 10.8 | 25.7 | 0.868 | 0.836 | 0.674 | 0.873 | 0.745 | 0.473 | 0.562 | 0.391 | 0.814 | 0.651 | 0.645 |
-| yolo26s-e2e-v10-100426 | 12.5 | 33.2 | 0.861 | 0.854 | 0.693 | 0.859 | 0.753 | 0.458 | 0.549 | 0.383 | 0.790 | 0.630 | 0.625 |
-| yolo11s-v10-210825 (**DPA**) | 10.1 | 24.1 | 0.866 | 0.822 | 0.684 | 0.839 | 0.754 | 0.455 | 0.552 | 0.377 | 0.784 | 0.606 | 0.640 |
-| yolo26n-v10-030426 | 3.26 | 8.76 | 0.824 | 0.770 | 0.498 | 0.824 | 0.722 | 0.423 | 0.520 | 0.363 | 0.739 | 0.551 | 0.636 |
-| yolo26n-e2e-v10-050426 | 4.2 | 12.9 | 0.813 | 0.780 | 0.547 | 0.785 | 0.680 | 0.366 | 0.481 | 0.336 | 0.679 | 0.509 | 0.594 |
-| yolo11l *(stock)* | 25.4 | 87.6 | 0.804 | — | 0.724 | — | — | — | — | — | — | — | — |
-| yolo26l *(stock)* | 26.3 | 93.8 | 0.804 | — | 0.737 | — | — | — | — | — | — | — | — |
-| yolo11s *(stock)* | 9.46 | 21.7 | 0.770 | — | 0.655 | — | — | — | — | — | — | — | — |
-| yolo26s *(stock)* | 10.0 | 22.8 | 0.765 | — | 0.677 | — | — | — | — | — | — | — | — |
-| yolo26n *(stock)* | 2.57 | 6.12 | 0.696 | — | 0.580 | — | — | — | — | — | — | — | — |
+<img src="images/results_weights_table.png" width="1700" alt="YOLO-DPAR results and weights table with End2End column">
+
+Regenerate this image from source data with:
+
+```bash
+python other/render_results_table.py
+```
 
 Stock models are standard Ultralytics YOLO trained on COCO (person + vehicle only; no face/pose/attribute). DPA/DPAR model weights are in `models/` (Git LFS).
 
@@ -135,6 +128,17 @@ The ReID path uses a separate **FiLM-modulated MLP adapter** (`ReIDAdapter`) tra
 The default embedding dimension is **80-d**, L2-normalized. Cosine similarity between two vectors gives a re-identification score; typical thresholds are 0.4–0.6 depending on the application.
 
 The ReID-capable models in this repository were trained with the [Ubon synthetic-reid dataset](https://github.com/ubonpartners/synthetic-reid).
+
+<img src="images/reid_comparison_grid_3x2.png" width="1800" alt="ReID comparison grid for stock YOLO26L, DPA, and DPAR models">
+
+Comparison on two validation queries from the Ubon synthetic-reid dataset:
+
+- **Left column (`yolo26l.pt`)** uses default YOLO `feats` as the ReID baseline and has the weakest retrieval quality.
+- **Middle column (`yolo26l-v10-240226.pt`)** is the YOLO26L + attributes (DPA) model and is already significantly better, showing that attribute training improves person discrimination.
+- **Right column (`yolo26l-e2e-v10r-080426.pt`)** is the YOLO26L + attributes + trained ReID (DPAR) model and gives the strongest retrieval quality across both queries.
+
+In each panel, the **top-left cell is the query image**, and the remaining cells are the **top-15 matches by cosine similarity** on the ReID vector.
+In the retrieval visualization, **green** boxes indicate correct matches and **blue** boxes indicate incorrect matches.
 
 For the full adapter training and fusion workflow, see the companion [reid repo](https://github.com/ubonpartners/reid).
 
