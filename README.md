@@ -187,6 +187,46 @@ Controls: press `p` to pause; left-click a person box to highlight it and show a
 
 ---
 
+## Benchmarking models
+
+This repo includes a benchmark runner that wraps Ultralytics `benchmark()` for DPA/DPAR checkpoints:
+
+```bash
+# quick smoke test on 1 model, 50 val images, PyTorch format only
+python benchmark_models.py \
+  --data /mldata/v10/coco/dataset.yaml \
+  --model-glob "yolo26s-e2e-v10r-100426.pt" \
+  --formats "-" \
+  --smoke-val-images 50 \
+  --half
+
+# full run on all models with common export formats
+python benchmark_models.py \
+  --data /mldata/v10/coco/dataset.yaml \
+  --formats "-,onnx,engine" \
+  --half \
+  --device 0
+```
+
+What this script does:
+- Copies each `.pt` to a temporary directory before running benchmark/export.
+- Applies a small runtime compatibility patch for `task=posereid`.
+- Collects all benchmark outputs into:
+  - `runs/benchmarks/<timestamp>/combined_results.csv`
+  - `runs/benchmarks/<timestamp>/combined_results.json`
+  - `runs/benchmarks/<timestamp>/combined_results_table.png`
+- Preserves benchmark metrics as real columns (for example `metrics/mAP50-95(P)`), not generic name/value pairs.
+- For `posereid` models, also adds:
+   - `metrics/mAP50_person(B)` (box AP50 for class `person` only)
+   - `metrics/mAP50_person(P)` (pose AP50 for class `person` only)
+   - `metrics/mAP50_all(B)` (box AP50 over all classes)
+
+Notes:
+- Ultralytics benchmark still logs to console and writes `benchmarks.log`, but this wrapper also returns structured combined output.
+- If your full validation set is large, use `--smoke-val-images` first to verify the pipeline and export dependencies quickly.
+
+---
+
 ## Training (local, standalone)
 
 `train.py` is a local training script that runs purely via Ultralytics — no cloud dependencies.
