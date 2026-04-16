@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import tempfile
 from contextlib import contextmanager
@@ -23,6 +24,10 @@ from typing import Any
 import yaml
 from ultralytics import YOLO
 from ultralytics.utils.benchmarks import benchmark
+
+STOCK_DETECT_MODELS = ("yolo26l.pt", "yolo26s.pt")
+STOCK_POSE_MODELS = ("yolo26l-pose.pt", "yolo26s-pose.pt")
+DEFAULT_STOCK_MODELS = (*STOCK_DETECT_MODELS, *STOCK_POSE_MODELS)
 
 
 @contextmanager
@@ -152,6 +157,15 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Benchmark yolo-dpar models with Ultralytics benchmark().")
     parser.add_argument("--models-dir", type=Path, default=Path("models"), help="Directory containing .pt files.")
     parser.add_argument("--model-glob", type=str, default="*.pt", help="Glob pattern for model selection.")
+    parser.add_argument(
+        "--include-stock-models",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Include stock Ultralytics checkpoints "
+            "(yolo26l.pt, yolo26l-pose.pt, yolo26s.pt, yolo26s-pose.pt), auto-downloaded if missing."
+        ),
+    )
     parser.add_argument("--data", type=Path, required=True, help="Dataset YAML path.")
     parser.add_argument("--imgsz", type=int, default=640, help="Benchmark image size.")
     parser.add_argument("--device", type=str, default="0", help="Benchmark device, e.g. 0, cpu, 0,1.")
@@ -209,6 +223,212 @@ def get_person_class_index(dataset_yaml: Path) -> int | None:
     return None
 
 
+def _iter_images(root: Path) -> list[Path]:
+    exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+    return sorted([p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in exts])
+
+
+def _symlink_or_copy(src: Path, dst: Path) -> None:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if dst.exists() or dst.is_symlink():
+        return
+    try:
+        os.symlink(src, dst)
+    except OSError:
+        shutil.copy2(src, dst)
+
+
+def _parse_source_kpt_shape(cfg: dict[str, Any]) -> tuple[int, int] | None:
+    kpt_shape = cfg.get("kpt_shape")
+    if isinstance(kpt_shape, (list, tuple)) and len(kpt_shape) == 2:
+        try:
+            return int(kpt_shape[0]), int(kpt_shape[1])
+        except Exception:
+            return None
+    return None
+
+
+def _source_attr_len(cfg: dict[str, Any]) -> int:
+    """Return per-label attribute column count used before keypoints in split format."""
+    attributes = bool(cfg.get("attributes", False))
+    attr_label_format = str(cfg.get("attr_label_format", "combined")).lower()
+    attr_nc = int(cfg.get("attr_nc", 0) or 0)
+    return attr_nc if attributes and attr_label_format == "split" else 0
+
+
+def _extract_person_pose_flat(
+    parts: list[str],
+    source_kpt_shape: tuple[int, int] | None,
+    dst_kpt_shape: tuple[int, int],
+    source_attr_len: int = 0,
+) -> list[float] | None:
+    if source_kpt_shape is None:
+        return None
+
+    src_nk, src_nd = source_kpt_shape
+    dst_nk, dst_nd = dst_kpt_shape
+    kpt_start = 5 + int(source_attr_len or 0)
+    need = kpt_start + src_nk * src_nd
+    if len(parts) < need:
+        return None
+
+    try:
+        raw = [float(x) for x in parts[kpt_start : kpt_start + src_nk * src_nd]]
+    except Exception:
+        return None
+    kpts = [raw[i * src_nd : (i + 1) * src_nd] for i in range(src_nk)]
+
+    # v10 merged labels are [5 face kpts + 17 person pose kpts].
+    if src_nk == 22 and dst_nk == 17:
+        chosen = kpts[5:22]
+    elif src_nk >= dst_nk:
+        chosen = kpts[src_nk - dst_nk :]
+    else:
+        return None
+
+    out: list[float] = []
+    for kp in chosen:
+        vals = kp[: min(src_nd, dst_nd)]
+        if len(vals) < dst_nd:
+            # Fill missing visibility channel when needed.
+            vals = vals + [1.0] * (dst_nd - len(vals))
+        out.extend(vals[:dst_nd])
+    return out
+
+
+def build_stock_intersection_datasets(source_yaml: Path, out_root: Path, pose_kpt_shape: tuple[int, int] = (17, 3)) -> dict[str, Path]:
+    """
+    Build stock-model-compatible dataset views from merged labels.
+
+    - detect view: person-only boxes (for stock detect models)
+    - pose view: person-only boxes + 17-keypoint pose (for stock pose models)
+    """
+    cfg, val_images, val_labels = resolve_dataset_paths(source_yaml)
+    person_idx = get_person_class_index(source_yaml)
+    if person_idx is None:
+        raise ValueError(f"Could not resolve 'person' class index from {source_yaml}")
+
+    source_kpt_shape = _parse_source_kpt_shape(cfg)
+    source_attr_len = _source_attr_len(cfg)
+    images = _iter_images(val_images)
+    if not images:
+        raise FileNotFoundError(f"No validation images found under {val_images}")
+
+    base = out_root / "stock_intersection"
+    detect_root = base / "detect"
+    pose_root = base / "pose"
+    detect_img_root = detect_root / "val" / "images"
+    detect_lbl_root = detect_root / "val" / "labels"
+    pose_img_root = pose_root / "val" / "images"
+    pose_lbl_root = pose_root / "val" / "labels"
+    detect_img_root.mkdir(parents=True, exist_ok=True)
+    detect_lbl_root.mkdir(parents=True, exist_ok=True)
+    pose_img_root.mkdir(parents=True, exist_ok=True)
+    pose_lbl_root.mkdir(parents=True, exist_ok=True)
+
+    for img in images:
+        rel = img.relative_to(val_images)
+        src_lbl = (val_labels / rel).with_suffix(".txt")
+        det_img = detect_img_root / rel
+        pose_img = pose_img_root / rel
+        det_lbl = (detect_lbl_root / rel).with_suffix(".txt")
+        pose_lbl = (pose_lbl_root / rel).with_suffix(".txt")
+        det_lbl.parent.mkdir(parents=True, exist_ok=True)
+        pose_lbl.parent.mkdir(parents=True, exist_ok=True)
+
+        _symlink_or_copy(img, det_img)
+        _symlink_or_copy(img, pose_img)
+
+        det_lines: list[str] = []
+        pose_lines: list[str] = []
+        if src_lbl.exists():
+            for line in src_lbl.read_text(encoding="utf-8", errors="ignore").splitlines():
+                parts = [x for x in line.strip().split() if x]
+                if len(parts) < 5:
+                    continue
+                try:
+                    cls_idx = int(float(parts[0]))
+                except Exception:
+                    continue
+                if cls_idx != person_idx:
+                    continue
+
+                det_lines.append(" ".join(["0", *parts[1:5]]))
+
+                pose_flat = _extract_person_pose_flat(parts, source_kpt_shape, pose_kpt_shape, source_attr_len)
+                if pose_flat is not None:
+                    pose_lines.append(" ".join(["0", *parts[1:5], *(f"{v:.6g}" for v in pose_flat)]))
+
+        det_lbl.write_text("\n".join(det_lines) + ("\n" if det_lines else ""), encoding="utf-8")
+        pose_lbl.write_text("\n".join(pose_lines) + ("\n" if pose_lines else ""), encoding="utf-8")
+
+    detect_yaml = detect_root / "dataset.yaml"
+    pose_yaml = pose_root / "dataset.yaml"
+
+    detect_cfg = {
+        "path": str(detect_root),
+        "train": "val/images",
+        "val": "val/images",
+        "nc": 1,
+        "names": ["person"],
+    }
+    pose_cfg = {
+        "path": str(pose_root),
+        "train": "val/images",
+        "val": "val/images",
+        "nc": 1,
+        "names": ["person"],
+        "kpt_shape": list(pose_kpt_shape),
+    }
+    detect_yaml.write_text(yaml.safe_dump(detect_cfg, sort_keys=False), encoding="utf-8")
+    pose_yaml.write_text(yaml.safe_dump(pose_cfg, sort_keys=False), encoding="utf-8")
+
+    return {"detect": detect_yaml, "pose": pose_yaml}
+
+
+def resolve_model_entries(models_dir: Path, model_glob: str, include_stock_models: bool) -> list[dict[str, str]]:
+    """
+    Resolve benchmark model sources into local paths ready for temp-copy benchmarking.
+
+    Returns list entries:
+      - model: display name (filename)
+      - source: original spec (path or model name)
+      - resolved_path: absolute local checkpoint path
+    """
+    entries: list[dict[str, str]] = []
+    local_paths = sorted(models_dir.glob(model_glob))
+    for p in local_paths:
+        entries.append(
+            {
+                "model": p.name,
+                "source": str(p),
+                "resolved_path": str(p.resolve()),
+            }
+        )
+
+    existing_names = {e["model"] for e in entries}
+    if include_stock_models:
+        for spec in DEFAULT_STOCK_MODELS:
+            model_name = Path(spec).name
+            if model_name in existing_names:
+                continue
+            print(f"[info] ensuring stock model is available: {spec}")
+            stock_model = YOLO(spec)  # triggers auto-download if missing
+            resolved = stock_model.pt_path or stock_model.ckpt_path or spec
+            resolved_path = Path(str(resolved)).expanduser().resolve()
+            if not resolved_path.exists():
+                raise FileNotFoundError(f"Stock model resolved path does not exist: {resolved_path}")
+            entries.append(
+                {
+                    "model": model_name,
+                    "source": spec,
+                    "resolved_path": str(resolved_path),
+                }
+            )
+            existing_names.add(model_name)
+    return entries
+
+
 def _class_ap50(metric_obj: Any, class_idx: int | None) -> float | None:
     """Extract AP50 for one class from a metric object using ap_class_index + all_ap."""
     if class_idx is None:
@@ -238,7 +458,7 @@ def artifact_path_for_format(copied_model: Path, fmt: str) -> Path:
     return copied_model
 
 
-def collect_posereid_extra_metrics(
+def collect_intersection_extra_metrics(
     model_artifact: Path,
     data_yaml: Path,
     imgsz: int,
@@ -248,16 +468,11 @@ def collect_posereid_extra_metrics(
     source_task: str | None = None,
 ) -> dict[str, Any]:
     """
-    Collect extra PoseReID benchmark metrics requested by the user.
-
-    Metrics:
-    - metrics/mAP50_person(B): non-pose AP50 for person class only
-    - metrics/mAP50_person(P): pose AP50 for person class only
-    - metrics/mAP50_all(B): non-pose AP50 for all classes
+    Collect extra intersection metrics for detect/pose/posereid tasks.
     """
     model = YOLO(str(model_artifact), task=source_task) if source_task else YOLO(str(model_artifact))
     task_name = source_task or model.task
-    if task_name != "posereid":
+    if task_name not in {"detect", "pose", "posereid"}:
         return {}
 
     results = model.val(
@@ -270,13 +485,36 @@ def collect_posereid_extra_metrics(
         verbose=False,
         conf=0.001,
     )
-    return {
-        "metrics/mAP50_person(B)": _class_ap50(results.box, person_class_index),
-        "metrics/mAP50_person(P)": _class_ap50(results.pose, person_class_index),
-        "metrics/mAP50_all(B)": float(results.results_dict.get("metrics/mAP50(B)"))
-        if results.results_dict.get("metrics/mAP50(B)") is not None
-        else None,
-    }
+    out: dict[str, Any] = {}
+    if results.results_dict.get("metrics/mAP50-95(B)") is not None:
+        out["metrics/mAP50-95(B)"] = float(results.results_dict.get("metrics/mAP50-95(B)"))
+    if results.results_dict.get("metrics/mAP50-95(P)") is not None:
+        out["metrics/mAP50-95(P)"] = float(results.results_dict.get("metrics/mAP50-95(P)"))
+    if results.results_dict.get("metrics/mAP50(B)") is not None:
+        out["metrics/mAP50_all(B)"] = float(results.results_dict.get("metrics/mAP50(B)"))
+    if hasattr(results, "box"):
+        out["metrics/mAP50_person(B)"] = _class_ap50(results.box, person_class_index)
+
+    if task_name in {"pose", "posereid"}:
+        if results.results_dict.get("metrics/mAP50(P)") is not None:
+            out["metrics/mAP50_all(P)"] = float(results.results_dict.get("metrics/mAP50(P)"))
+        if hasattr(results, "pose"):
+            out["metrics/mAP50_person(P)"] = _class_ap50(results.pose, person_class_index)
+    return out
+
+
+def choose_data_for_model(
+    model_name: str,
+    default_data_yaml: Path,
+    stock_intersection: dict[str, Path] | None,
+) -> Path:
+    """Select benchmark data yaml per model with stock-model intersection handling."""
+    if stock_intersection:
+        if model_name in STOCK_DETECT_MODELS:
+            return stock_intersection["detect"]
+        if model_name in STOCK_POSE_MODELS:
+            return stock_intersection["pose"]
+    return default_data_yaml
 
 
 def export_kwargs_for_format(fmt: str, args: argparse.Namespace) -> dict[str, Any]:
@@ -349,6 +587,26 @@ def _cell_color(value: float | None, values: list[float], higher_better: bool = 
     return (float(bg[0]), float(bg[1]), float(bg[2]), 1.0)
 
 
+def _dataset_label(path_like: Any) -> str:
+    """Build a compact dataset label for table display."""
+    raw = str(path_like or "").strip()
+    if not raw:
+        return "-"
+    try:
+        p = Path(raw)
+    except Exception:
+        return raw
+
+    parts = p.parts
+    if "stock_intersection" in parts:
+        i = parts.index("stock_intersection")
+        tail = parts[i + 1 :]
+        return "/".join(tail[-2:]) if len(tail) >= 2 else "stock_intersection"
+    if "smoke_data" in parts:
+        return "smoke_dataset"
+    return p.name
+
+
 def render_results_table_image(records: list[dict[str, Any]], output_path: Path) -> Path | None:
     """
     Render a styled PNG summary table for benchmark results.
@@ -370,10 +628,13 @@ def render_results_table_image(records: list[dict[str, Any]], output_path: Path)
         return None
 
     metric_cols_all = [c for c in df.columns if c.startswith("metrics/")]
+    image_excluded_metrics = {"metrics/mAP50_all(P)", "metrics/mAP50-95(P)"}
+    metric_cols_all = [c for c in metric_cols_all if c not in image_excluded_metrics]
     preferred_metric_order = [
         "metrics/mAP50_person(B)",
         "metrics/mAP50_person(P)",
         "metrics/mAP50_all(B)",
+        "metrics/mAP50_all(P)",
         "metrics/mAP50(B)",
         "metrics/mAP50(P)",
         "metrics/mAP50-95(B)",
@@ -386,11 +647,13 @@ def render_results_table_image(records: list[dict[str, Any]], output_path: Path)
 
     base_cols = [
         col
-        for col in ("model", "format", "format_request", "status", "size_mb", "inference_ms_per_im", "fps")
+        for col in ("model", "data_yaml", "format", "format_request", "status", "size_mb", "inference_ms_per_im", "fps")
         if col in df.columns
     ]
     table_cols = base_cols + metric_cols
     tdf = df[table_cols].copy()
+    if "data_yaml" in tdf.columns:
+        tdf["data_yaml"] = tdf["data_yaml"].map(_dataset_label)
     if "status" in tdf.columns:
         tdf["status"] = tdf["status"].map(
             lambda s: "OK" if "✅" in str(s) else ("WARN" if str(s) in {"❎", "❌"} else str(s))
@@ -399,6 +662,7 @@ def render_results_table_image(records: list[dict[str, Any]], output_path: Path)
     # Compact column labels for the image table.
     label_map = {
         "model": "Model",
+        "data_yaml": "Dataset",
         "format": "Format",
         "format_request": "ReqFmt",
         "status": "Status",
@@ -408,6 +672,7 @@ def render_results_table_image(records: list[dict[str, Any]], output_path: Path)
         "metrics/mAP50_person(B)": "mAP50 Person Box",
         "metrics/mAP50_person(P)": "mAP50 Person Pose",
         "metrics/mAP50_all(B)": "mAP50 All Box",
+        "metrics/mAP50_all(P)": "mAP50 All Pose",
         "metrics/mAP50(B)": "mAP50 Box",
         "metrics/mAP50(P)": "mAP50 Pose",
         "metrics/mAP50-95(B)": "mAP50-95 Box",
@@ -417,7 +682,7 @@ def render_results_table_image(records: list[dict[str, Any]], output_path: Path)
     tdf.rename(columns={k: v for k, v in label_map.items() if k in tdf.columns}, inplace=True)
 
     numeric_cols = [
-        c for c in tdf.columns if c not in {"Model", "Format", "ReqFmt", "Status"}
+        c for c in tdf.columns if c not in {"Model", "Dataset", "Format", "ReqFmt", "Status"}
     ]
     numeric_values: dict[str, list[float]] = {}
     for col in numeric_cols:
@@ -455,6 +720,7 @@ def render_results_table_image(records: list[dict[str, Any]], output_path: Path)
     nrows, ncols = display_df.shape
     col_widths = {
         "Model": 0.20,
+        "Dataset": 0.12,
         "Format": 0.07,
         "ReqFmt": 0.06,
         "Status": 0.06,
@@ -526,11 +792,13 @@ def main() -> int:
     if not data_yaml.exists():
         raise FileNotFoundError(f"Dataset yaml not found: {data_yaml}")
 
-    models = sorted(models_dir.glob(args.model_glob))
+    model_entries = resolve_model_entries(models_dir, args.model_glob, args.include_stock_models)
     if args.limit_models and args.limit_models > 0:
-        models = models[: args.limit_models]
-    if not models:
-        raise FileNotFoundError(f"No models matched {args.model_glob} in {models_dir}")
+        model_entries = model_entries[: args.limit_models]
+    if not model_entries:
+        raise FileNotFoundError(
+            f"No benchmark models resolved (glob={args.model_glob}, include_stock_models={args.include_stock_models})."
+        )
 
     formats = [x.strip() for x in args.formats.split(",") if x.strip()]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -543,26 +811,35 @@ def main() -> int:
         smoke_root.mkdir(parents=True, exist_ok=True)
         data_for_run = build_smoke_dataset(data_yaml, args.smoke_val_images, smoke_root)
         print(f"[info] smoke dataset created: {data_for_run}")
-    person_class_index = get_person_class_index(data_for_run)
+    stock_intersection = None
+    if any(e["model"] in DEFAULT_STOCK_MODELS for e in model_entries):
+        stock_intersection = build_stock_intersection_datasets(data_for_run, run_dir)
+        print(f"[info] stock detect intersection data: {stock_intersection['detect']}")
+        print(f"[info] stock pose intersection data: {stock_intersection['pose']}")
 
     records: list[dict[str, Any]] = []
-    for model_path in models:
+    for model_entry in model_entries:
+        model_name = model_entry["model"]
+        model_source = model_entry["source"]
+        model_resolved_path = Path(model_entry["resolved_path"])
         try:
-            source_model = YOLO(str(model_path))
+            source_model = YOLO(str(model_resolved_path))
             source_task = source_model.task
         except Exception:
             source_task = None
+        model_data_yaml = choose_data_for_model(model_name, data_for_run, stock_intersection)
+        model_person_idx = get_person_class_index(model_data_yaml)
         for fmt in formats:
             tmp_dir = Path(tempfile.mkdtemp(prefix="ubon_bench_model_"))
-            copied_model = tmp_dir / model_path.name
-            shutil.copy2(model_path, copied_model)
-            print(f"[run] model={model_path.name} format={fmt} temp={tmp_dir}")
+            copied_model = tmp_dir / model_name
+            shutil.copy2(model_resolved_path, copied_model)
+            print(f"[run] model={model_name} format={fmt} temp={tmp_dir}")
 
             try:
                 with pushd(tmp_dir):
                     df = benchmark(
                         model=str(copied_model),
-                        data=str(data_for_run),
+                        data=str(model_data_yaml),
                         imgsz=args.imgsz,
                         half=args.half,
                         device=args.device,
@@ -576,13 +853,13 @@ def main() -> int:
                     artifact_path = artifact_path_for_format(copied_model, fmt)
                     if artifact_path.exists():
                         try:
-                            extra_metrics = collect_posereid_extra_metrics(
+                            extra_metrics = collect_intersection_extra_metrics(
                                 model_artifact=artifact_path,
-                                data_yaml=data_for_run,
+                                data_yaml=model_data_yaml,
                                 imgsz=args.imgsz,
                                 half=args.half,
                                 device=args.device,
-                                person_class_index=person_class_index,
+                                person_class_index=model_person_idx,
                                 source_task=source_task,
                             )
                         except Exception as metric_exc:
@@ -590,8 +867,10 @@ def main() -> int:
 
                     records.append(
                         {
-                            "model": model_path.name,
-                            "model_path": str(model_path),
+                            "model": model_name,
+                            "model_source": model_source,
+                            "model_path": str(model_resolved_path),
+                            "data_yaml": str(model_data_yaml),
                             "format_request": fmt,
                             "format": row.get("Format"),
                             "status": row.get("Status❔"),
@@ -606,21 +885,21 @@ def main() -> int:
             except Exception as exc:  # keep iterating on failures
                 records.append(
                     {
-                        "model": model_path.name,
-                        "model_path": str(model_path),
+                        "model": model_name,
+                        "model_source": model_source,
+                        "model_path": str(model_resolved_path),
+                        "data_yaml": str(model_data_yaml),
                         "format_request": fmt,
                         "format": fmt,
                         "status": "CRASH",
                         "size_mb": None,
-                        "metric_name": "",
-                        "metric_value": None,
                         "inference_ms_per_im": None,
                         "fps": None,
                         "temp_dir": str(tmp_dir),
                         "error": str(exc),
                     }
                 )
-                print(f"[error] model={model_path.name} format={fmt}: {exc}")
+                print(f"[error] model={model_name} format={fmt}: {exc}")
             finally:
                 if not args.keep_temp:
                     shutil.rmtree(tmp_dir, ignore_errors=True)

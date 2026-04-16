@@ -210,6 +210,10 @@ python benchmark_models.py \
 
 What this script does:
 - Copies each `.pt` to a temporary directory before running benchmark/export.
+- Includes stock Ultralytics checkpoints `yolo26l.pt`, `yolo26l-pose.pt`, `yolo26s.pt`, and `yolo26s-pose.pt` by default (auto-download if missing).
+- For stock checkpoints, auto-builds a "sensible intersection" dataset view:
+  - stock detect models (`yolo26l.pt`, `yolo26s.pt`): person-only detection labels
+  - stock pose models (`yolo26l-pose.pt`, `yolo26s-pose.pt`): person-only detection + 17-keypoint pose labels
 - Applies a small runtime compatibility patch for `task=posereid`.
 - Collects all benchmark outputs into:
   - `runs/benchmarks/<timestamp>/combined_results.csv`
@@ -220,10 +224,12 @@ What this script does:
    - `metrics/mAP50_person(B)` (box AP50 for class `person` only)
    - `metrics/mAP50_person(P)` (pose AP50 for class `person` only)
    - `metrics/mAP50_all(B)` (box AP50 over all classes)
+  - `metrics/mAP50_all(P)` (pose AP50 over all classes, where applicable)
 
 Notes:
 - Ultralytics benchmark still logs to console and writes `benchmarks.log`, but this wrapper also returns structured combined output.
 - If your full validation set is large, use `--smoke-val-images` first to verify the pipeline and export dependencies quickly.
+- To disable stock checkpoint inclusion, pass `--no-include-stock-models`.
 
 ---
 
