@@ -229,6 +229,9 @@ What this script does:
   - `runs/benchmarks/<timestamp>/combined_results.json`
   - `runs/benchmarks/<timestamp>/combined_results_table.png`
 - Preserves benchmark metrics as real columns (for example `metrics/mAP50-95(P)`), not generic name/value pairs.
+- Adds explicit model metadata columns:
+  - `e2e` (whether E2E was detected as active for the specific benchmark artifact/run)
+  - `model_size` (`n/s/m/l/x` inferred from model name when available)
 - For `posereid` models, also adds:
    - `metrics/mAP50_person(B)` (box AP50 for class `person` only)
    - `metrics/mAP50_person(P)` (pose AP50 for class `person` only)

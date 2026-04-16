@@ -17,6 +17,7 @@ import multiprocessing as mp
 import os
 import queue
 import random
+import re
 import shutil
 import subprocess
 import tempfile
@@ -516,6 +517,31 @@ def _class_ap50(metric_obj: Any, class_idx: int | None) -> float | None:
     return None
 
 
+def infer_model_size_tag(model_name: str) -> str | None:
+    """Infer model size tag (n/s/m/l/x) from a YOLO-style filename."""
+    m = re.search(r"yolo\d+([nslmx])(?:[-_.]|$)", model_name.lower())
+    return m.group(1) if m else None
+
+
+def extract_model_end2end_flag(model_obj: Any | None) -> bool | None:
+    """Read end2end flag from a loaded YOLO model object without filename heuristics."""
+    if model_obj is None:
+        return None
+    try:
+        mm = getattr(model_obj, "model", None)
+        if mm is not None:
+            e2e = getattr(mm, "end2end", None)
+            if isinstance(e2e, bool):
+                return e2e
+            if hasattr(mm, "model") and len(mm.model):
+                e2e_last = getattr(mm.model[-1], "end2end", None)
+                if isinstance(e2e_last, bool):
+                    return e2e_last
+    except Exception:
+        return None
+    return None
+
+
 def artifact_path_for_format(copied_model: Path, fmt: str) -> Path:
     """Return expected artifact path for a benchmark format request."""
     if fmt == "-":
@@ -536,14 +562,15 @@ def collect_intersection_extra_metrics(
     device: str,
     person_class_index: int | None,
     source_task: str | None = None,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], bool | None]:
     """
     Collect extra intersection metrics for detect/pose/posereid tasks.
     """
     model = YOLO(str(model_artifact), task=source_task) if source_task else YOLO(str(model_artifact))
+    e2e_used = extract_model_end2end_flag(model)
     task_name = source_task or model.task
     if task_name not in {"detect", "pose", "posereid"}:
-        return {}
+        return {}, e2e_used
 
     results = model.val(
         data=str(data_yaml),
@@ -570,7 +597,7 @@ def collect_intersection_extra_metrics(
             out["metrics/mAP50_all(P)"] = float(results.results_dict.get("metrics/mAP50(P)"))
         if hasattr(results, "pose"):
             out["metrics/mAP50_person(P)"] = _class_ap50(results.pose, person_class_index)
-    return out
+    return out, e2e_used
 
 
 def choose_data_for_model(
@@ -654,6 +681,7 @@ def run_single_benchmark_job(job: dict[str, Any], args: argparse.Namespace, devi
     model_data_yaml = Path(str(job["data_yaml"]))
     model_person_idx = job.get("person_class_index")
     source_task = job.get("source_task")
+    model_size = job.get("model_size")
     fmt = str(job["format_request"])
     job_idx = int(job["job_idx"])
 
@@ -678,10 +706,11 @@ def run_single_benchmark_job(job: dict[str, Any], args: argparse.Namespace, devi
         for row in df.to_dicts():
             benchmark_metric_payload = {col: row.get(col, None) for col in metric_cols}
             extra_metrics: dict[str, Any] = {}
+            e2e_used: bool | None = None
             artifact_path = artifact_path_for_format(copied_model, fmt)
             if artifact_path.exists():
                 try:
-                    extra_metrics = collect_intersection_extra_metrics(
+                    extra_metrics, e2e_used = collect_intersection_extra_metrics(
                         model_artifact=artifact_path,
                         data_yaml=model_data_yaml,
                         imgsz=args.imgsz,
@@ -697,6 +726,8 @@ def run_single_benchmark_job(job: dict[str, Any], args: argparse.Namespace, devi
                 {
                     "_job_idx": job_idx,
                     "model": model_name,
+                    "model_size": model_size,
+                    "e2e": e2e_used,
                     "model_source": model_source,
                     "model_path": str(model_resolved_path),
                     "data_yaml": str(model_data_yaml),
@@ -717,6 +748,8 @@ def run_single_benchmark_job(job: dict[str, Any], args: argparse.Namespace, devi
             {
                 "_job_idx": job_idx,
                 "model": model_name,
+                "model_size": model_size,
+                "e2e": None,
                 "model_source": model_source,
                 "model_path": str(model_resolved_path),
                 "data_yaml": str(model_data_yaml),
@@ -763,6 +796,8 @@ def _parallel_worker(
                     {
                         "_job_idx": int(job.get("job_idx", -1)),
                         "model": str(job.get("model", "unknown")),
+                        "model_size": job.get("model_size"),
+                        "e2e": None,
                         "model_source": str(job.get("model_source", "unknown")),
                         "model_path": str(job.get("model_path", "")),
                         "data_yaml": str(job.get("data_yaml", "")),
@@ -930,7 +965,22 @@ def _dataset_label(path_like: Any) -> str:
     return p.name
 
 
-def render_results_table_image(records: list[dict[str, Any]], output_path: Path) -> Path | None:
+def _dataset_title_label(path_like: Any) -> str:
+    """Build a compact dataset label for the image title."""
+    raw = str(path_like or "").strip()
+    if not raw:
+        return "-"
+    try:
+        p = Path(raw)
+    except Exception:
+        return raw
+    parts = p.parts
+    return "/".join(parts[-2:]) if len(parts) >= 2 else p.name
+
+
+def render_results_table_image(
+    records: list[dict[str, Any]], output_path: Path, input_dataset: Any | None = None
+) -> Path | None:
     """
     Render a styled PNG summary table for benchmark results.
 
@@ -970,13 +1020,17 @@ def render_results_table_image(records: list[dict[str, Any]], output_path: Path)
 
     base_cols = [
         col
-        for col in ("model", "data_yaml", "format", "format_request", "status", "size_mb", "inference_ms_per_im", "fps")
+        for col in ("model", "model_size", "e2e", "format", "status", "size_mb", "inference_ms_per_im", "fps")
         if col in df.columns
     ]
     table_cols = base_cols + metric_cols
     tdf = df[table_cols].copy()
-    if "data_yaml" in tdf.columns:
-        tdf["data_yaml"] = tdf["data_yaml"].map(_dataset_label)
+    if "model_size" in tdf.columns:
+        tdf["model_size"] = tdf["model_size"].map(
+            lambda x: "-" if x in {None, "", "-"} else str(x).upper()
+        )
+    if "e2e" in tdf.columns:
+        tdf["e2e"] = tdf["e2e"].map(lambda x: "Yes" if x is True else ("No" if x is False else "-"))
     if "status" in tdf.columns:
         tdf["status"] = tdf["status"].map(
             lambda s: "OK" if "✅" in str(s) else ("WARN" if str(s) in {"❎", "❌"} else str(s))
@@ -985,9 +1039,9 @@ def render_results_table_image(records: list[dict[str, Any]], output_path: Path)
     # Compact column labels for the image table.
     label_map = {
         "model": "Model",
-        "data_yaml": "Dataset",
+        "model_size": "Model Size",
+        "e2e": "E2E Used",
         "format": "Format",
-        "format_request": "ReqFmt",
         "status": "Status",
         "size_mb": "Size MB",
         "inference_ms_per_im": "Infer ms/im",
@@ -1005,7 +1059,7 @@ def render_results_table_image(records: list[dict[str, Any]], output_path: Path)
     tdf.rename(columns={k: v for k, v in label_map.items() if k in tdf.columns}, inplace=True)
 
     numeric_cols = [
-        c for c in tdf.columns if c not in {"Model", "Dataset", "Format", "ReqFmt", "Status"}
+        c for c in tdf.columns if c not in {"Model", "Model Size", "E2E Used", "Format", "Status"}
     ]
     numeric_values: dict[str, list[float]] = {}
     for col in numeric_cols:
@@ -1030,9 +1084,24 @@ def render_results_table_image(records: list[dict[str, Any]], output_path: Path)
     fig.patch.set_facecolor("white")
     ax.set_position([0.01, 0.01, 0.98, 0.98])
 
+    header_label_map = {
+        "Model Size": "Model\nSize",
+        "E2E Used": "E2E\nUsed",
+        "Infer ms/im": "Infer\nms/im",
+        "mAP50 Person Box": "mAP50\nPerson Box",
+        "mAP50 Person Pose": "mAP50\nPerson Pose",
+        "mAP50 All Box": "mAP50\nAll Box",
+        "mAP50 Box": "mAP50\nBox",
+        "mAP50 Pose": "mAP50\nPose",
+        "mAP50-95 Box": "mAP50-95\nBox",
+        "mAP50-95 Pose": "mAP50-95\nPose",
+        "mAP50 Attr": "mAP50\nAttr",
+    }
+    col_labels = [header_label_map.get(c, c) for c in display_df.columns]
+
     table = ax.table(
         cellText=display_df.values,
-        colLabels=display_df.columns,
+        colLabels=col_labels,
         loc="center",
         cellLoc="center",
     )
@@ -1042,10 +1111,10 @@ def render_results_table_image(records: list[dict[str, Any]], output_path: Path)
 
     nrows, ncols = display_df.shape
     col_widths = {
-        "Model": 0.20,
-        "Dataset": 0.12,
+        "Model": 0.17,
+        "Model Size": 0.06,
+        "E2E Used": 0.07,
         "Format": 0.07,
-        "ReqFmt": 0.06,
         "Status": 0.06,
         "Size MB": 0.07,
         "Infer ms/im": 0.09,
@@ -1057,6 +1126,7 @@ def render_results_table_image(records: list[dict[str, Any]], output_path: Path)
         head = table[0, col_idx]
         head.set_facecolor("#1f2937")
         head.set_text_props(color="white", weight="bold")
+        head.set_height(head.get_height() * 1.18)
         head.set_edgecolor("#111827")
         head.set_linewidth(1.0)
         if col_name == "Model":
@@ -1078,6 +1148,9 @@ def render_results_table_image(records: list[dict[str, Any]], output_path: Path)
                 cell.set_facecolor(zebra)
                 cell.set_text_props(ha="left")
                 continue
+            if col_name in {"Model Size", "E2E Used"}:
+                cell.set_facecolor(zebra)
+                continue
             if col_name == "Status":
                 status = str(tdf.iloc[row_idx - 1][col_name])
                 if status == "OK":
@@ -1097,7 +1170,10 @@ def render_results_table_image(records: list[dict[str, Any]], output_path: Path)
             else:
                 cell.set_facecolor(zebra)
 
-    ax.set_title("YOLO-DPAR Benchmark Results", fontsize=13, fontweight="bold", pad=6)
+    title = "YOLO-DPAR Benchmark Results"
+    if input_dataset:
+        title += f" | Input data: {_dataset_title_label(input_dataset)}"
+    ax.set_title(title, fontsize=13, fontweight="bold", pad=6)
     fig.tight_layout(pad=0.2)
     fig.savefig(output_path, dpi=240, bbox_inches="tight", pad_inches=0.03)
     plt.close(fig)
@@ -1146,11 +1222,14 @@ def main() -> int:
         model_name = model_entry["model"]
         model_source = model_entry["source"]
         model_resolved_path = Path(model_entry["resolved_path"])
+        loaded_model = None
         try:
-            source_model = YOLO(str(model_resolved_path))
-            source_task = source_model.task
+            loaded_model = YOLO(str(model_resolved_path))
+            source_task = loaded_model.task
         except Exception:
             source_task = None
+        model_size = infer_model_size_tag(model_name)
+        print(f"[info] model meta: {model_name} size={str(model_size or '-').upper()}")
         model_data_yaml = choose_data_for_model(model_name, data_for_run, stock_intersection)
         model_person_idx = get_person_class_index(model_data_yaml)
         prepared_models.append(
@@ -1158,6 +1237,7 @@ def main() -> int:
                 "model": model_name,
                 "model_source": model_source,
                 "model_path": str(model_resolved_path),
+                "model_size": model_size,
                 "data_yaml": str(model_data_yaml),
                 "person_class_index": model_person_idx,
                 "source_task": source_task,
@@ -1201,7 +1281,7 @@ def main() -> int:
         writer.writerows(records)
 
     image_path = run_dir / "combined_results_table.png"
-    rendered_image = render_results_table_image(records, image_path)
+    rendered_image = render_results_table_image(records, image_path, input_dataset=data_yaml)
 
     print(f"[done] results rows={len(records)}")
     print(f"[done] csv={csv_path}")
