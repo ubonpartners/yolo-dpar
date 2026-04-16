@@ -239,6 +239,7 @@ Notes:
 - Ultralytics benchmark still logs to console and writes `benchmarks.log`, but this wrapper also returns structured combined output.
 - If your full validation set is large, use `--smoke-val-images` first to verify the pipeline and export dependencies quickly.
 - To disable stock checkpoint inclusion, pass `--no-include-stock-models`.
+- Parallel mode is on by default: it auto-detects visible GPUs and runs one worker process per GPU; disable with `--no-parallel`.
 - The script now fails fast with a clear error if any selected `.pt` file is still a Git LFS pointer (not real checkpoint bytes).
 
 ---

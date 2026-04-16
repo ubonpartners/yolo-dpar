@@ -13,8 +13,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import multiprocessing as mp
 import os
+import queue
 import shutil
+import subprocess
 import tempfile
 from contextlib import contextmanager
 from datetime import datetime
@@ -255,6 +258,12 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("runs/benchmarks"),
         help="Directory for combined outputs.",
+    )
+    parser.add_argument(
+        "--parallel",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Run benchmark jobs in parallel across all visible GPUs (default: on).",
     )
     parser.add_argument("--keep-temp", action="store_true", help="Keep per-model temporary benchmark directories.")
     return parser.parse_args()
@@ -583,6 +592,240 @@ def export_kwargs_for_format(fmt: str, args: argparse.Namespace) -> dict[str, An
     return kwargs
 
 
+def detect_visible_gpu_indices() -> list[str]:
+    """
+    Detect visible GPU indices as strings ("0", "1", ...).
+
+    Uses torch first, then falls back to nvidia-smi when available.
+    """
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            n = int(torch.cuda.device_count())
+            if n > 0:
+                return [str(i) for i in range(n)]
+    except Exception:
+        pass
+
+    try:
+        proc = subprocess.run(
+            ["nvidia-smi", "-L"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]
+            return [str(i) for i in range(len(lines))]
+    except Exception:
+        pass
+
+    return []
+
+
+def run_single_benchmark_job(job: dict[str, Any], args: argparse.Namespace, device: str) -> list[dict[str, Any]]:
+    """Run one (model, format) benchmark job and return result records."""
+    model_name = str(job["model"])
+    model_source = str(job["model_source"])
+    model_resolved_path = Path(str(job["model_path"]))
+    model_data_yaml = Path(str(job["data_yaml"]))
+    model_person_idx = job.get("person_class_index")
+    source_task = job.get("source_task")
+    fmt = str(job["format_request"])
+    job_idx = int(job["job_idx"])
+
+    records: list[dict[str, Any]] = []
+    tmp_dir = Path(tempfile.mkdtemp(prefix="ubon_bench_model_"))
+    copied_model = tmp_dir / model_name
+    shutil.copy2(model_resolved_path, copied_model)
+    print(f"[run] model={model_name} format={fmt} device={device} temp={tmp_dir}")
+
+    try:
+        with pushd(tmp_dir):
+            df = benchmark(
+                model=str(copied_model),
+                data=str(model_data_yaml),
+                imgsz=args.imgsz,
+                half=args.half,
+                device=device,
+                format=fmt,
+                **export_kwargs_for_format(fmt, args),
+            )
+        metric_cols = [c for c in df.columns if c.startswith("metrics/")]
+        for row in df.to_dicts():
+            benchmark_metric_payload = {col: row.get(col, None) for col in metric_cols}
+            extra_metrics: dict[str, Any] = {}
+            artifact_path = artifact_path_for_format(copied_model, fmt)
+            if artifact_path.exists():
+                try:
+                    extra_metrics = collect_intersection_extra_metrics(
+                        model_artifact=artifact_path,
+                        data_yaml=model_data_yaml,
+                        imgsz=args.imgsz,
+                        half=args.half,
+                        device=device,
+                        person_class_index=model_person_idx,
+                        source_task=source_task,
+                    )
+                except Exception as metric_exc:
+                    extra_metrics = {"pose_metric_error": str(metric_exc)}
+
+            records.append(
+                {
+                    "_job_idx": job_idx,
+                    "model": model_name,
+                    "model_source": model_source,
+                    "model_path": str(model_resolved_path),
+                    "data_yaml": str(model_data_yaml),
+                    "format_request": fmt,
+                    "format": row.get("Format"),
+                    "status": row.get("Status❔"),
+                    "size_mb": row.get("Size (MB)"),
+                    "inference_ms_per_im": row.get("Inference time (ms/im)"),
+                    "fps": row.get("FPS"),
+                    "temp_dir": str(tmp_dir),
+                    "device": device,
+                    **benchmark_metric_payload,
+                    **extra_metrics,
+                }
+            )
+    except Exception as exc:  # keep iterating on failures
+        records.append(
+            {
+                "_job_idx": job_idx,
+                "model": model_name,
+                "model_source": model_source,
+                "model_path": str(model_resolved_path),
+                "data_yaml": str(model_data_yaml),
+                "format_request": fmt,
+                "format": fmt,
+                "status": "CRASH",
+                "size_mb": None,
+                "inference_ms_per_im": None,
+                "fps": None,
+                "temp_dir": str(tmp_dir),
+                "device": device,
+                "error": str(exc),
+            }
+        )
+        print(f"[error] model={model_name} format={fmt} device={device}: {exc}")
+    finally:
+        if not args.keep_temp:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    return records
+
+
+def _parallel_worker(
+    work_q: mp.Queue,
+    out_q: mp.Queue,
+    worker_device: str,
+    args: argparse.Namespace,
+) -> None:
+    """Worker loop pinned to one GPU device."""
+    patch_posereid_benchmark_compat()
+    while True:
+        job = work_q.get()
+        if job is None:
+            break
+        try:
+            out_q.put(run_single_benchmark_job(job, args, device=worker_device))
+        except KeyboardInterrupt:
+            raise
+        except Exception as exc:
+            # Keep coordinator alive even if worker sees an unexpected failure.
+            out_q.put(
+                [
+                    {
+                        "_job_idx": int(job.get("job_idx", -1)),
+                        "model": str(job.get("model", "unknown")),
+                        "model_source": str(job.get("model_source", "unknown")),
+                        "model_path": str(job.get("model_path", "")),
+                        "data_yaml": str(job.get("data_yaml", "")),
+                        "format_request": str(job.get("format_request", "")),
+                        "format": str(job.get("format_request", "")),
+                        "status": "CRASH",
+                        "size_mb": None,
+                        "inference_ms_per_im": None,
+                        "fps": None,
+                        "temp_dir": None,
+                        "device": worker_device,
+                        "error": f"worker_error: {exc}",
+                    }
+                ]
+            )
+
+
+def run_jobs_serial(jobs: list[dict[str, Any]], args: argparse.Namespace, device: str) -> list[dict[str, Any]]:
+    """Execute all jobs sequentially on one device."""
+    records: list[dict[str, Any]] = []
+    total = len(jobs)
+    if total:
+        print(f"[progress] jobs total={total} completed=0 remaining={total}")
+    for idx, job in enumerate(jobs, start=1):
+        records.extend(run_single_benchmark_job(job, args, device=device))
+        remaining = total - idx
+        print(f"[progress] jobs total={total} completed={idx} remaining={remaining}")
+    return records
+
+
+def run_jobs_parallel(jobs: list[dict[str, Any]], args: argparse.Namespace, gpu_devices: list[str]) -> list[dict[str, Any]]:
+    """Execute jobs in parallel, one process per GPU, pulling from shared queue."""
+    if not jobs:
+        return []
+    if not gpu_devices:
+        return run_jobs_serial(jobs, args, device=str(args.device))
+
+    ctx = mp.get_context("spawn")
+    work_q = ctx.Queue()
+    out_q = ctx.Queue()
+
+    for job in jobs:
+        work_q.put(job)
+    for _ in gpu_devices:
+        work_q.put(None)
+
+    procs = [
+        ctx.Process(target=_parallel_worker, args=(work_q, out_q, gpu, args), name=f"bench-gpu-{gpu}")
+        for gpu in gpu_devices
+    ]
+    for p in procs:
+        p.start()
+
+    records: list[dict[str, Any]] = []
+    expected = len(jobs)
+    received = 0
+    print(f"[progress] jobs total={expected} completed=0 remaining={expected}")
+
+    try:
+        while received < expected:
+            try:
+                batch = out_q.get(timeout=1.0)
+            except queue.Empty:
+                dead = [p for p in procs if (not p.is_alive()) and (p.exitcode not in (0, None))]
+                if dead:
+                    codes = ", ".join(f"{p.name}:{p.exitcode}" for p in dead)
+                    raise RuntimeError(f"Parallel benchmark worker failed ({codes}).")
+                continue
+            records.extend(batch)
+            received += 1
+            remaining = expected - received
+            print(f"[progress] jobs total={expected} completed={received} remaining={remaining}")
+    except KeyboardInterrupt:
+        for p in procs:
+            if p.is_alive():
+                p.terminate()
+        for p in procs:
+            p.join(timeout=2.0)
+        raise
+    finally:
+        for p in procs:
+            p.join()
+
+    return records
+
+
 def _to_float(value: Any) -> float | None:
     """Best-effort conversion to float."""
     if value is None:
@@ -875,7 +1118,7 @@ def main() -> int:
         print(f"[info] stock detect intersection data: {stock_intersection['detect']}")
         print(f"[info] stock pose intersection data: {stock_intersection['pose']}")
 
-    records: list[dict[str, Any]] = []
+    prepared_models: list[dict[str, Any]] = []
     for model_entry in model_entries:
         model_name = model_entry["model"]
         model_source = model_entry["source"]
@@ -887,80 +1130,38 @@ def main() -> int:
             source_task = None
         model_data_yaml = choose_data_for_model(model_name, data_for_run, stock_intersection)
         model_person_idx = get_person_class_index(model_data_yaml)
+        prepared_models.append(
+            {
+                "model": model_name,
+                "model_source": model_source,
+                "model_path": str(model_resolved_path),
+                "data_yaml": str(model_data_yaml),
+                "person_class_index": model_person_idx,
+                "source_task": source_task,
+            }
+        )
+
+    jobs: list[dict[str, Any]] = []
+    job_idx = 0
+    for pm in prepared_models:
         for fmt in formats:
-            tmp_dir = Path(tempfile.mkdtemp(prefix="ubon_bench_model_"))
-            copied_model = tmp_dir / model_name
-            shutil.copy2(model_resolved_path, copied_model)
-            print(f"[run] model={model_name} format={fmt} temp={tmp_dir}")
+            jobs.append({**pm, "format_request": fmt, "job_idx": job_idx})
+            job_idx += 1
 
-            try:
-                with pushd(tmp_dir):
-                    df = benchmark(
-                        model=str(copied_model),
-                        data=str(model_data_yaml),
-                        imgsz=args.imgsz,
-                        half=args.half,
-                        device=args.device,
-                        format=fmt,
-                        **export_kwargs_for_format(fmt, args),
-                    )
-                metric_cols = [c for c in df.columns if c.startswith("metrics/")]
-                for row in df.to_dicts():
-                    benchmark_metric_payload = {col: row.get(col, None) for col in metric_cols}
-                    extra_metrics: dict[str, Any] = {}
-                    artifact_path = artifact_path_for_format(copied_model, fmt)
-                    if artifact_path.exists():
-                        try:
-                            extra_metrics = collect_intersection_extra_metrics(
-                                model_artifact=artifact_path,
-                                data_yaml=model_data_yaml,
-                                imgsz=args.imgsz,
-                                half=args.half,
-                                device=args.device,
-                                person_class_index=model_person_idx,
-                                source_task=source_task,
-                            )
-                        except Exception as metric_exc:
-                            extra_metrics = {"pose_metric_error": str(metric_exc)}
+    gpu_devices = detect_visible_gpu_indices()
+    use_parallel = bool(args.parallel and len(gpu_devices) > 1)
+    if use_parallel:
+        print(f"[info] parallel mode enabled: {len(gpu_devices)} GPU workers ({', '.join(gpu_devices)})")
+        records = run_jobs_parallel(jobs, args, gpu_devices=gpu_devices)
+    else:
+        if args.parallel and len(gpu_devices) <= 1:
+            reason = "no visible GPUs" if len(gpu_devices) == 0 else "single visible GPU"
+            print(f"[info] parallel mode requested but using serial mode ({reason})")
+        records = run_jobs_serial(jobs, args, device=str(args.device))
 
-                    records.append(
-                        {
-                            "model": model_name,
-                            "model_source": model_source,
-                            "model_path": str(model_resolved_path),
-                            "data_yaml": str(model_data_yaml),
-                            "format_request": fmt,
-                            "format": row.get("Format"),
-                            "status": row.get("Status❔"),
-                            "size_mb": row.get("Size (MB)"),
-                            "inference_ms_per_im": row.get("Inference time (ms/im)"),
-                            "fps": row.get("FPS"),
-                            "temp_dir": str(tmp_dir),
-                            **benchmark_metric_payload,
-                            **extra_metrics,
-                        }
-                    )
-            except Exception as exc:  # keep iterating on failures
-                records.append(
-                    {
-                        "model": model_name,
-                        "model_source": model_source,
-                        "model_path": str(model_resolved_path),
-                        "data_yaml": str(model_data_yaml),
-                        "format_request": fmt,
-                        "format": fmt,
-                        "status": "CRASH",
-                        "size_mb": None,
-                        "inference_ms_per_im": None,
-                        "fps": None,
-                        "temp_dir": str(tmp_dir),
-                        "error": str(exc),
-                    }
-                )
-                print(f"[error] model={model_name} format={fmt}: {exc}")
-            finally:
-                if not args.keep_temp:
-                    shutil.rmtree(tmp_dir, ignore_errors=True)
+    records.sort(key=lambda r: int(r.get("_job_idx", 10**9)))
+    for row in records:
+        row.pop("_job_idx", None)
 
     # Write combined outputs without requiring pandas/polars.
     json_path = run_dir / "combined_results.json"
