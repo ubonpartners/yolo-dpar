@@ -16,6 +16,7 @@ import json
 import multiprocessing as mp
 import os
 import queue
+import random
 import shutil
 import subprocess
 import tempfile
@@ -32,6 +33,7 @@ STOCK_DETECT_MODELS = ("yolo26l.pt", "yolo26s.pt")
 STOCK_POSE_MODELS = ("yolo26l-pose.pt", "yolo26s-pose.pt")
 DEFAULT_STOCK_MODELS = (*STOCK_DETECT_MODELS, *STOCK_POSE_MODELS)
 LFS_POINTER_PREFIX = b"version https://git-lfs.github.com/spec/v1"
+SMOKE_SHUFFLE_SEED = 0
 
 
 def is_git_lfs_pointer_file(path: Path) -> bool:
@@ -183,6 +185,7 @@ def build_smoke_dataset(source_yaml: Path, sample_count: int, out_root: Path) ->
     out_val_labels.mkdir(parents=True, exist_ok=True)
 
     image_files = sorted([p for ext in ("*.jpg", "*.jpeg", "*.png", "*.bmp", "*.webp") for p in val_images.glob(ext)])
+    random.Random(SMOKE_SHUFFLE_SEED).shuffle(image_files)
     if not image_files:
         raise FileNotFoundError(f"No validation images found under {val_images}")
 
@@ -208,6 +211,7 @@ def build_smoke_dataset(source_yaml: Path, sample_count: int, out_root: Path) ->
     smoke_cfg["val"] = "val/images"
     smoke_yaml = out_root / "smoke_dataset.yaml"
     smoke_yaml.write_text(yaml.safe_dump(smoke_cfg, sort_keys=False), encoding="utf-8")
+    print(f"[info] smoke sampling uses deterministic shuffle seed={SMOKE_SHUFFLE_SEED}")
     return smoke_yaml
 
 
