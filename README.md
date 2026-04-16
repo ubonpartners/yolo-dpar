@@ -133,11 +133,11 @@ The ReID-capable models in this repository were trained with the [Ubon synthetic
 
 Comparison on two validation queries from the Ubon synthetic-reid dataset:
 
-- **Left column** uses stock YOLO26L `feats` as the ReID baseline (not one of the packaged checkpoints) and has the weakest retrieval quality.
-- **Middle column (`yolo26l-v10r-240226.pt`)** is the non-E2E YOLO26L DPAR checkpoint and is significantly better.
-- **Right column (`yolo26l-e2e-v10r-080426.pt`)** is the E2E YOLO26L DPAR checkpoint and gives the strongest retrieval quality across both queries.
+- **Left column** uses stock YOLO26L `feats` as the baseline (not one of the packaged checkpoints) and has the weakest retrieval quality.
+- **Middle column (`yolo26l-v10-240226.pt`)** is a non-E2E **attribute-only** checkpoint (**no ReID head**). Even without dedicated ReID training, retrieval improves noticeably over the stock baseline, consistent with attribute supervision making person features more discriminative (for example, clothing color and related cues).
+- **Right column (`yolo26l-e2e-v10r-080426.pt`)** is the E2E YOLO26L DPAR checkpoint (with ReID) and gives the strongest retrieval quality across both queries.
 
-In each panel, the **top-left cell is the query image**, and the remaining cells are the **top-15 matches by cosine similarity** on the ReID vector.
+In each panel, the **top-left cell is the query image**, and the remaining cells are the **top-15 matches by cosine similarity** on the extracted person feature vector (`feats` for stock/attribute-only models, `reid_embeddings` for DPAR models).
 In the retrieval visualization, **green** boxes indicate correct matches and **blue** boxes indicate incorrect matches.
 
 For the full adapter training and fusion workflow, see the companion [reid repo](https://github.com/ubonpartners/reid).
