@@ -16,10 +16,39 @@ Keys:
 """
 
 import argparse
+from pathlib import Path
+
 import cv2
 import ultralytics
 import other.display as other_display
 import other.ultralytics as other_ultralytics
+
+LFS_POINTER_PREFIX = b"version https://git-lfs.github.com/spec/v1"
+
+
+def _is_git_lfs_pointer_file(path: Path) -> bool:
+    try:
+        if not path.is_file():
+            return False
+        with path.open("rb") as f:
+            head = f.read(256)
+    except OSError:
+        return False
+    return head.startswith(LFS_POINTER_PREFIX)
+
+
+def _raise_if_model_is_lfs_pointer(model_path: str) -> None:
+    """Catch common Git LFS pointer mistakes with an actionable error."""
+    path = Path(model_path).expanduser()
+    if not path.exists() or not path.is_file():
+        return
+    if _is_git_lfs_pointer_file(path):
+        raise RuntimeError(
+            f"Model file is a Git LFS pointer, not real weights: {path}\n"
+            "Install/fetch Git LFS weights, then re-run:\n"
+            "  git lfs install\n"
+            "  git lfs pull --include=\"models/*.pt\""
+        )
 
 
 def get_attr_names(model):
@@ -35,6 +64,7 @@ def get_attr_names(model):
 
 
 def do_video(model_path, video):
+    _raise_if_model_is_lfs_pointer(model_path)
     model = ultralytics.YOLO(model_path)
     class_names = [model.names[i] for i in range(len(model.names))]
     attr_names  = get_attr_names(model)

@@ -28,6 +28,38 @@ from ultralytics.utils.benchmarks import benchmark
 STOCK_DETECT_MODELS = ("yolo26l.pt", "yolo26s.pt")
 STOCK_POSE_MODELS = ("yolo26l-pose.pt", "yolo26s-pose.pt")
 DEFAULT_STOCK_MODELS = (*STOCK_DETECT_MODELS, *STOCK_POSE_MODELS)
+LFS_POINTER_PREFIX = b"version https://git-lfs.github.com/spec/v1"
+
+
+def is_git_lfs_pointer_file(path: Path) -> bool:
+    """Return True when a file is a Git LFS pointer text blob."""
+    try:
+        if not path.is_file():
+            return False
+        with path.open("rb") as f:
+            head = f.read(256)
+    except OSError:
+        return False
+    return head.startswith(LFS_POINTER_PREFIX)
+
+
+def raise_if_lfs_pointer_files(paths: list[Path], include_glob: str = "models/*.pt") -> None:
+    """Fail fast with an actionable message when checkpoints are LFS pointers."""
+    pointer_paths = [p for p in paths if is_git_lfs_pointer_file(p)]
+    if not pointer_paths:
+        return
+
+    listed = "\n".join(f"  - {p}" for p in pointer_paths)
+    raise RuntimeError(
+        "Detected Git LFS pointer file(s) instead of real .pt checkpoints:\n"
+        f"{listed}\n\n"
+        "These files are text pointers (typically ~130 bytes), so PyTorch cannot load them.\n"
+        "Install/fetch Git LFS weights, then re-run:\n"
+        "  git lfs install\n"
+        f"  git lfs pull --include=\"{include_glob}\"\n"
+        "If git-lfs is missing on Ubuntu/Debian:\n"
+        "  sudo apt-get update && sudo apt-get install -y git-lfs"
+    )
 
 
 @contextmanager
@@ -109,6 +141,29 @@ def resolve_dataset_paths(dataset_yaml: Path) -> tuple[dict[str, Any], Path, Pat
     val_images = (base / val_rel).resolve()
     val_labels = (base / val_rel.parent / "labels").resolve()
     return cfg, val_images, val_labels
+
+
+def ensure_train_key_for_benchmark(dataset_yaml: Path, out_root: Path) -> Path:
+    """
+    Ensure dataset yaml has a train key for Ultralytics benchmark() checks.
+
+    Some val-only datasets intentionally omit `train`. Ultralytics benchmark()
+    currently enforces both keys, so we create a runtime copy with train=val.
+    """
+    cfg = yaml.safe_load(dataset_yaml.read_text(encoding="utf-8")) or {}
+    if cfg.get("train"):
+        return dataset_yaml
+    if not cfg.get("val"):
+        raise KeyError(f"{dataset_yaml} is missing required 'val' key.")
+
+    patched = dict(cfg)
+    patched["train"] = cfg["val"]
+    patched_root = out_root / "runtime_data"
+    patched_root.mkdir(parents=True, exist_ok=True)
+    patched_yaml = patched_root / f"{dataset_yaml.stem}_benchmark.yaml"
+    patched_yaml.write_text(yaml.safe_dump(patched, sort_keys=False), encoding="utf-8")
+    print(f"[info] dataset yaml missing train; wrote runtime benchmark yaml: {patched_yaml}")
+    return patched_yaml
 
 
 def build_smoke_dataset(source_yaml: Path, sample_count: int, out_root: Path) -> Path:
@@ -397,6 +452,7 @@ def resolve_model_entries(models_dir: Path, model_glob: str, include_stock_model
     """
     entries: list[dict[str, str]] = []
     local_paths = sorted(models_dir.glob(model_glob))
+    raise_if_lfs_pointer_files(local_paths, include_glob=f"{models_dir.name}/{model_glob}")
     for p in local_paths:
         entries.append(
             {
@@ -418,6 +474,7 @@ def resolve_model_entries(models_dir: Path, model_glob: str, include_stock_model
             resolved_path = Path(str(resolved)).expanduser().resolve()
             if not resolved_path.exists():
                 raise FileNotFoundError(f"Stock model resolved path does not exist: {resolved_path}")
+            raise_if_lfs_pointer_files([resolved_path], include_glob=f"{models_dir.name}/{model_glob}")
             entries.append(
                 {
                     "model": model_name,
@@ -811,6 +868,7 @@ def main() -> int:
         smoke_root.mkdir(parents=True, exist_ok=True)
         data_for_run = build_smoke_dataset(data_yaml, args.smoke_val_images, smoke_root)
         print(f"[info] smoke dataset created: {data_for_run}")
+    data_for_run = ensure_train_key_for_benchmark(data_for_run, run_dir)
     stock_intersection = None
     if any(e["model"] in DEFAULT_STOCK_MODELS for e in model_entries):
         stock_intersection = build_stock_intersection_datasets(data_for_run, run_dir)

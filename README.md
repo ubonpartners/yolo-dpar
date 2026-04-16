@@ -171,7 +171,16 @@ pip install -e .
 cd ../yolo-dpar
 ```
 
-Model weights are in `models/` via Git LFS. Ensure Git LFS is installed; if weights are still pointers after clone, run `git lfs pull`.
+Model weights are in `models/` via Git LFS. Install and fetch them after clone:
+
+```bash
+# Ubuntu/Debian (skip if already installed)
+sudo apt-get update
+sudo apt-get install -y git-lfs
+
+git lfs install
+git lfs pull --include="models/*.pt"
+```
 
 ```bash
 # webcam (default: models/yolo26l-e2e-v10r-080426.pt)
@@ -230,6 +239,7 @@ Notes:
 - Ultralytics benchmark still logs to console and writes `benchmarks.log`, but this wrapper also returns structured combined output.
 - If your full validation set is large, use `--smoke-val-images` first to verify the pipeline and export dependencies quickly.
 - To disable stock checkpoint inclusion, pass `--no-include-stock-models`.
+- The script now fails fast with a clear error if any selected `.pt` file is still a Git LFS pointer (not real checkpoint bytes).
 
 ---
 
