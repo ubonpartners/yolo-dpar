@@ -137,6 +137,31 @@ def patch_posereid_benchmark_compat() -> None:
     PoseValidator._ubon_posereid_patch = True
 
 
+def patch_force_val_rect_false() -> None:
+    """
+    Force rect=False for all YOLO val() calls in this process.
+
+    Why:
+    - Ultralytics val defaults rect=True, which can introduce large first-pass timing
+      artifacts due to variable-shape batches and kernel/autotune churn.
+    - benchmark() does not expose rect in its val() call path, so we patch val()
+      centrally for stable, comparable timing.
+    """
+    from ultralytics.engine.model import Model as UltralyticsModel
+
+    if getattr(UltralyticsModel, "_ubon_rect_false_patch", False):
+        return
+
+    _orig_val = UltralyticsModel.val
+
+    def _patched_val(self, validator=None, **kwargs):  # noqa: ANN001
+        kwargs.setdefault("rect", False)
+        return _orig_val(self, validator=validator, **kwargs)
+
+    UltralyticsModel.val = _patched_val
+    UltralyticsModel._ubon_rect_false_patch = True
+
+
 def resolve_dataset_paths(dataset_yaml: Path) -> tuple[dict[str, Any], Path, Path]:
     """Resolve absolute image/label roots from a dataset yaml."""
     cfg = yaml.safe_load(dataset_yaml.read_text(encoding="utf-8"))
@@ -263,6 +288,15 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("runs/benchmarks"),
         help="Directory for combined outputs.",
+    )
+    parser.add_argument(
+        "--warmup-val-images",
+        type=int,
+        default=0,
+        help=(
+            "If >0, run a small vanilla benchmark() warmup pass on N val images before each main job. "
+            "Results from warmup pass are discarded."
+        ),
     )
     parser.add_argument(
         "--parallel",
@@ -682,6 +716,8 @@ def run_single_benchmark_job(job: dict[str, Any], args: argparse.Namespace, devi
     model_person_idx = job.get("person_class_index")
     source_task = job.get("source_task")
     model_size = job.get("model_size")
+    warmup_data_yaml_raw = job.get("warmup_data_yaml")
+    warmup_data_yaml = Path(str(warmup_data_yaml_raw)) if warmup_data_yaml_raw else None
     fmt = str(job["format_request"])
     job_idx = int(job["job_idx"])
 
@@ -693,6 +729,17 @@ def run_single_benchmark_job(job: dict[str, Any], args: argparse.Namespace, devi
 
     try:
         with pushd(tmp_dir):
+            if warmup_data_yaml is not None:
+                print(f"[warmup] model={model_name} format={fmt} device={device} data={warmup_data_yaml}")
+                _ = benchmark(
+                    model=str(copied_model),
+                    data=str(warmup_data_yaml),
+                    imgsz=args.imgsz,
+                    half=args.half,
+                    device=device,
+                    format=fmt,
+                    **export_kwargs_for_format(fmt, args),
+                )
             df = benchmark(
                 model=str(copied_model),
                 data=str(model_data_yaml),
@@ -1183,6 +1230,8 @@ def render_results_table_image(
 def main() -> int:
     args = parse_args()
     patch_posereid_benchmark_compat()
+    patch_force_val_rect_false()
+    print("[info] forcing rect=False for all validation calls (stable benchmark timing)")
 
     models_dir = args.models_dir.resolve()
     data_yaml = args.data.resolve()
@@ -1244,11 +1293,26 @@ def main() -> int:
             }
         )
 
+    warmup_dataset_map: dict[str, str] = {}
+    if args.warmup_val_images and args.warmup_val_images > 0:
+        unique_model_data = sorted({str(pm["data_yaml"]) for pm in prepared_models})
+        warmup_root = run_dir / "warmup_data"
+        warmup_root.mkdir(parents=True, exist_ok=True)
+        for i, ds_raw in enumerate(unique_model_data):
+            ds_path = Path(ds_raw)
+            ds_key = str(ds_path.resolve())
+            ds_out = warmup_root / f"set_{i:02d}"
+            ds_out.mkdir(parents=True, exist_ok=True)
+            warmup_yaml = build_smoke_dataset(ds_path, args.warmup_val_images, ds_out)
+            warmup_dataset_map[ds_key] = str(warmup_yaml.resolve())
+            print(f"[info] warmup dataset created: source={ds_path} warmup={warmup_yaml}")
+
     jobs: list[dict[str, Any]] = []
     job_idx = 0
     for pm in prepared_models:
         for fmt in formats:
-            jobs.append({**pm, "format_request": fmt, "job_idx": job_idx})
+            warmup_yaml = warmup_dataset_map.get(str(Path(pm["data_yaml"]).resolve()))
+            jobs.append({**pm, "format_request": fmt, "job_idx": job_idx, "warmup_data_yaml": warmup_yaml})
             job_idx += 1
 
     gpu_devices = detect_visible_gpu_indices()
