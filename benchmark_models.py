@@ -624,6 +624,24 @@ def detect_visible_gpu_indices() -> list[str]:
     return []
 
 
+def configure_ultralytics_console(plain_progress: bool) -> None:
+    """
+    Configure Ultralytics console behavior.
+
+    In multiprocess mode we prefer plain logging (no in-place progress redraws)
+    to avoid interleaved ANSI output from concurrent workers.
+    """
+    if not plain_progress:
+        return
+    os.environ["YOLO_VERBOSE"] = "False"
+    try:
+        import ultralytics.utils as uutils
+
+        uutils.VERBOSE = False
+    except Exception:
+        pass
+
+
 def run_single_benchmark_job(job: dict[str, Any], args: argparse.Namespace, device: str) -> list[dict[str, Any]]:
     """Run one (model, format) benchmark job and return result records."""
     model_name = str(job["model"])
@@ -724,6 +742,7 @@ def _parallel_worker(
     args: argparse.Namespace,
 ) -> None:
     """Worker loop pinned to one GPU device."""
+    configure_ultralytics_console(plain_progress=True)
     patch_posereid_benchmark_compat()
     while True:
         job = work_q.get()
@@ -1151,6 +1170,7 @@ def main() -> int:
     gpu_devices = detect_visible_gpu_indices()
     use_parallel = bool(args.parallel and len(gpu_devices) > 1)
     if use_parallel:
+        configure_ultralytics_console(plain_progress=True)
         print(f"[info] parallel mode enabled: {len(gpu_devices)} GPU workers ({', '.join(gpu_devices)})")
         records = run_jobs_parallel(jobs, args, gpu_devices=gpu_devices)
     else:
