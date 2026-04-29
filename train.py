@@ -293,7 +293,9 @@ def _default_run_spec(user_name: Optional[str], default_project: str) -> RunSpec
 
 def _pick_mode_section(cfg: Dict[str, Any], mode: str) -> Dict[str, Any]:
     if mode not in cfg:
-        raise KeyError(f"Config missing section '{mode}'. Expected one of: from_scratch, fine_tune, transfer, resume")
+        raise KeyError(
+            f"Config missing section '{mode}'. Expected one of: from_scratch, fine_tune, transfer, resume, qat"
+        )
     section = cfg[mode] or {}
     if not isinstance(section, dict):
         raise TypeError(f"Config section '{mode}' must be a mapping/dict")
@@ -441,6 +443,12 @@ def _resolve_model_source(
     if "weights" in train_cfg:
         return str(train_cfg["weights"])
 
+    if mode == "qat":
+        raise KeyError(
+            "qat mode requires 'weights:' in the qat section — "
+            "QAT must fine-tune an existing FP32/FP16 checkpoint."
+        )
+
     # from scratch: build a model YAML that matches dataset classes/keypoints
     return _make_model_source_from_scratch(train_cfg, dataset_cfg, run_dir)
 
@@ -519,7 +527,7 @@ def main() -> None:
         "--mode",
         type=str,
         default="from_scratch",
-        choices=["from_scratch", "fine_tune", "transfer", "resume"],
+        choices=["from_scratch", "fine_tune", "transfer", "resume", "qat"],
         help="which config section to use",
     )
     parser.add_argument("--name", type=str, default=None, help="run name (default: timestamped)")
@@ -668,11 +676,14 @@ def main() -> None:
                 # Overrides the bootstrapped weights wherever the e2e source has better matches.
                 init_one2one_from(model, one2one_src)
 
-    # common train params (kept close to the original script)
-    is_qat = bool(_get(train_cfg, "int8", False))
+    # common train params (kept close to the original script).
+    # QAT defaults differ — short fine-tune on a pre-trained checkpoint with a small LR.
+    is_qat = args.mode == "qat"
+    default_lr0 = 1e-4 if is_qat else 0.01
+    default_epochs = 5 if is_qat else 50
     optimizer = _get(train_cfg, "optimizer", "auto")
-    lr0 = _get(train_cfg, "lr0", 0.01)
-    epochs = _get(train_cfg, "epochs", 50)
+    lr0 = _get(train_cfg, "lr0", default_lr0)
+    epochs = _get(train_cfg, "epochs", default_epochs)
     imgsz = _get(train_cfg, "imgsz", 640)
     freeze = _get(train_cfg, "freeze", None)
     if freeze == "backbone":
@@ -719,10 +730,26 @@ def main() -> None:
     if freeze is not None:
         train_kwargs["freeze"] = freeze
 
-    if "int8" in train_cfg:
-        train_kwargs["int8"] = bool(train_cfg["int8"])
-    if "amp" in train_cfg:
-        train_kwargs["amp"] = bool(train_cfg["amp"])
+    if is_qat:
+        # QAT fine-tune: forces int8=True so the trainer inserts Q/DQ via modelopt.
+        # Allow yaml to disable explicitly (`int8: false`) for debugging — anything else
+        # in qat mode without int8=True would be a no-op.
+        train_kwargs["int8"] = bool(_get(train_cfg, "int8", True))
+        if not train_kwargs["int8"]:
+            print("[warn] qat mode but int8=false in config; QAT layers will NOT be inserted.")
+        # AMP and QAT do not mix cleanly in modelopt — fake-quant scales are FP32.
+        # Accept user override but warn.
+        train_kwargs["amp"] = bool(_get(train_cfg, "amp", False))
+        if train_kwargs["amp"]:
+            print("[warn] qat mode with amp=true is unsupported by modelopt and may produce NaNs.")
+        # torch.compile + Q/DQ wrappers tends to break tracing; default off.
+        if "compile" not in train_cfg:
+            train_kwargs["compile"] = False
+    else:
+        if "int8" in train_cfg:
+            train_kwargs["int8"] = bool(train_cfg["int8"])
+        if "amp" in train_cfg:
+            train_kwargs["amp"] = bool(train_cfg["amp"])
 
     backbone_lr_scale = _get(train_cfg, "backbone_lr_scale", None)
     if backbone_lr_scale is not None:
