@@ -293,9 +293,7 @@ def _default_run_spec(user_name: Optional[str], default_project: str) -> RunSpec
 
 def _pick_mode_section(cfg: Dict[str, Any], mode: str) -> Dict[str, Any]:
     if mode not in cfg:
-        raise KeyError(
-            f"Config missing section '{mode}'. Expected one of: from_scratch, fine_tune, transfer, resume, qat"
-        )
+        raise KeyError(f"Config missing section '{mode}'. Expected one of: from_scratch, fine_tune, transfer, resume")
     section = cfg[mode] or {}
     if not isinstance(section, dict):
         raise TypeError(f"Config section '{mode}' must be a mapping/dict")
@@ -443,17 +441,17 @@ def _resolve_model_source(
     if "weights" in train_cfg:
         return str(train_cfg["weights"])
 
-    if mode == "qat":
-        raise KeyError(
-            "qat mode requires 'weights:' in the qat section — "
-            "QAT must fine-tune an existing FP32/FP16 checkpoint."
-        )
-
     # from scratch: build a model YAML that matches dataset classes/keypoints
     return _make_model_source_from_scratch(train_cfg, dataset_cfg, run_dir)
 
 
-def _auto_batch_and_device(model: YOLO, requested_batch: int, requested_device: str) -> tuple[int, Any]:
+def _auto_batch_and_device(
+    model: YOLO,
+    requested_batch: int,
+    requested_device: str,
+    *,
+    qat: bool = False,
+) -> tuple[int, Any]:
     """
     Ultralytics auto-batch doesn't work well for multi-GPU in some setups.
     Keep a simple heuristic from the original script.
@@ -496,6 +494,17 @@ def _auto_batch_and_device(model: YOLO, requested_batch: int, requested_device: 
                 batch = int((batch * 3)//2)
         device = [x for x in range(num_gpus)]
 
+    if qat and num_gpus > 1:
+        qat_cap = 8 * num_gpus
+        if batch == -1 or batch > qat_cap:
+            old_batch = batch
+            batch = qat_cap
+            print(
+                f"[qat] Reducing DDP batch from {old_batch} to {batch} "
+                f"({batch // num_gpus}/GPU). QAT keeps FP32 activations plus fake-quant state, "
+                "so the regular DDP batch heuristic is too aggressive."
+            )
+
     batch = int(batch)
     print(f"GPUs:{num_gpus} params:{num_params_m:.1f}M (size:{model_size}) gpu_GB:{gpu_gb:.1f} batch:{batch}")
     return batch, device
@@ -510,7 +519,7 @@ def main() -> None:
         "--mode",
         type=str,
         default="from_scratch",
-        choices=["from_scratch", "fine_tune", "transfer", "resume", "qat"],
+        choices=["from_scratch", "fine_tune", "transfer", "resume"],
         help="which config section to use",
     )
     parser.add_argument("--name", type=str, default=None, help="run name (default: timestamped)")
@@ -659,14 +668,11 @@ def main() -> None:
                 # Overrides the bootstrapped weights wherever the e2e source has better matches.
                 init_one2one_from(model, one2one_src)
 
-    # common train params (kept close to the original script).
-    # QAT defaults differ — short fine-tune on a pre-trained checkpoint with a small LR.
-    is_qat = args.mode == "qat"
-    default_lr0 = 1e-4 if is_qat else 0.01
-    default_epochs = 5 if is_qat else 50
+    # common train params (kept close to the original script)
+    is_qat = bool(_get(train_cfg, "int8", False))
     optimizer = _get(train_cfg, "optimizer", "auto")
-    lr0 = _get(train_cfg, "lr0", default_lr0)
-    epochs = _get(train_cfg, "epochs", default_epochs)
+    lr0 = _get(train_cfg, "lr0", 0.01)
+    epochs = _get(train_cfg, "epochs", 50)
     imgsz = _get(train_cfg, "imgsz", 640)
     freeze = _get(train_cfg, "freeze", None)
     if freeze == "backbone":
@@ -687,7 +693,7 @@ def main() -> None:
     patience = _get(train_cfg, "patience", 200)
     batch = int(_get(train_cfg, "batch", -1))
 
-    batch, device = _auto_batch_and_device(model, batch, args.device)
+    batch, device = _auto_batch_and_device(model, batch, args.device, qat=is_qat)
 
     # Let Ultralytics manage run folder naming via (project, name)
     train_kwargs: Dict[str, Any] = dict(
@@ -713,21 +719,10 @@ def main() -> None:
     if freeze is not None:
         train_kwargs["freeze"] = freeze
 
-    if is_qat:
-        # QAT fine-tune: forces int8=True so the trainer inserts Q/DQ via modelopt.
-        # Allow yaml to disable explicitly (`int8: false`) for debugging — anything else
-        # in qat mode without int8=True would be a no-op.
-        train_kwargs["int8"] = bool(_get(train_cfg, "int8", True))
-        if not train_kwargs["int8"]:
-            print("[warn] qat mode but int8=false in config; QAT layers will NOT be inserted.")
-        # AMP and QAT do not mix cleanly in modelopt — fake-quant scales are FP32.
-        # Accept user override but warn.
-        train_kwargs["amp"] = bool(_get(train_cfg, "amp", False))
-        if train_kwargs["amp"]:
-            print("[warn] qat mode with amp=true is unsupported by modelopt and may produce NaNs.")
-        # torch.compile + Q/DQ wrappers tends to break tracing; default off.
-        if "compile" not in train_cfg:
-            train_kwargs["compile"] = False
+    if "int8" in train_cfg:
+        train_kwargs["int8"] = bool(train_cfg["int8"])
+    if "amp" in train_cfg:
+        train_kwargs["amp"] = bool(train_cfg["amp"])
 
     backbone_lr_scale = _get(train_cfg, "backbone_lr_scale", None)
     if backbone_lr_scale is not None:
