@@ -745,13 +745,6 @@ def main() -> None:
         # torch.compile + Q/DQ wrappers tends to break tracing; default off.
         if "compile" not in train_cfg:
             train_kwargs["compile"] = False
-        # Optional list of glob-substring patterns matching module names where Q/DQ
-        # should NOT be inserted (e.g. ["model.23"] for the detection head, matching
-        # the FP16-pinned region in quant/make_int8.py). DFL exclusion is structural
-        # and lives in trainer.build_quantized_model — do not duplicate it here.
-        exclude_patterns = _get(train_cfg, "exclude_patterns", None)
-        if exclude_patterns:
-            train_kwargs["qat_exclude"] = [str(p) for p in exclude_patterns]
     else:
         if "int8" in train_cfg:
             train_kwargs["int8"] = bool(train_cfg["int8"])
@@ -769,6 +762,15 @@ def main() -> None:
             )
         else:
             print(f"backbone_lr_scale={backbone_lr_scale} — backbone/neck layers will use lr * {backbone_lr_scale}")
+
+    # Fine-tune-style runs start from a real checkpoint, so report the initial
+    # validation baseline before any optimizer step. For QAT this is the
+    # post-calibration fake-quant model.
+    val_at_start_cfg = _get(train_cfg, "val_at_start", None)
+    if val_at_start_cfg is not None:
+        train_kwargs["val_at_start"] = bool(val_at_start_cfg)
+    elif args.mode in {"fine_tune", "qat"}:
+        train_kwargs["val_at_start"] = True
 
     # for fine-tune / transfer / scratch, keep optimizer/lr0 explicit
     train_kwargs["optimizer"] = optimizer
