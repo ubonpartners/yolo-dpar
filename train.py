@@ -578,6 +578,12 @@ def main() -> None:
         raise KeyError("Config must include a 'dataset' mapping (Ultralytics dataset config)")
 
     dataset_cfg = cfg["dataset"].copy()
+    train_cfg = _pick_mode_section(cfg, args.mode)
+    for key in ("train_subsample", "val_subsample"):
+        if key in train_cfg:
+            if key in dataset_cfg and dataset_cfg[key] != train_cfg[key]:
+                print(f"[info] {args.mode}.{key} overrides dataset.{key} ({dataset_cfg[key]} -> {train_cfg[key]})")
+            dataset_cfg[key] = train_cfg[key]
     _normalize_val_subsample(dataset_cfg)
     _normalize_train_subsample(dataset_cfg)
     # If dataset has a path to a dir, merge in attributes/attr_nc/attr_label_format from dataset.yaml there (v10 format)
@@ -591,8 +597,6 @@ def main() -> None:
                     if k in from_file and k not in dataset_cfg:
                         dataset_cfg[k] = from_file[k]
                 break
-    train_cfg = _pick_mode_section(cfg, args.mode)
-
     run_spec = _default_run_spec(args.name, args.project)
     run_dir = Path(args.project) / run_spec.name
     run_dir.mkdir(parents=True, exist_ok=True)
