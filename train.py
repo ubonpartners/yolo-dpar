@@ -503,7 +503,7 @@ def _auto_batch_and_device(
         device = [x for x in range(num_gpus)]
 
     if qat and num_gpus > 1:
-        qat_cap = 8 * num_gpus
+        qat_cap = 16 * num_gpus
         if batch == -1 or batch > qat_cap:
             old_batch = batch
             batch = qat_cap
