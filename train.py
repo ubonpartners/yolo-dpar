@@ -772,6 +772,7 @@ def main() -> None:
         # torch.compile + Q/DQ wrappers tends to break tracing; default off.
         if "compile" not in train_cfg:
             train_kwargs["compile"] = False
+        train_kwargs["cos_lr"] = bool(_get(train_cfg, "cos_lr", True))
         # Optional list of glob-substring patterns matching module names where Q/DQ
         # should NOT be inserted (e.g. ["model.23"] for the detection head, matching
         # the FP16-pinned region in quant/make_int8.py). DFL exclusion is structural
@@ -822,6 +823,8 @@ def main() -> None:
     # for fine-tune / transfer / scratch, keep optimizer/lr0 explicit
     train_kwargs["optimizer"] = optimizer
     train_kwargs["lr0"] = lr0
+    if "weight_decay" in train_cfg:
+        train_kwargs["weight_decay"] = float(train_cfg["weight_decay"])
 
     print("Training with kwargs:")
     for k in sorted(train_kwargs.keys()):
