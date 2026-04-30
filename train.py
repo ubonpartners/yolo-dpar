@@ -118,6 +118,28 @@ def _normalize_val_subsample(dataset_cfg: Dict[str, Any]) -> None:
     dataset_cfg["subsample"] = val_subsample
 
 
+def _normalize_train_subsample(dataset_cfg: Dict[str, Any]) -> None:
+    """
+    Validate optional `train_subsample` (stride sampling for the train dataloader).
+
+    Unlike `fraction` (which is a deterministic prefix slice and biases multi-source
+    train lists toward whichever dataset comes first), `train_subsample=N` keeps every
+    Nth file across the concatenated list — representative across all sources.
+    """
+    if "train_subsample" not in dataset_cfg:
+        return
+
+    raw = dataset_cfg["train_subsample"]
+    try:
+        train_subsample = int(raw)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"dataset.train_subsample must be an integer >= 1, got {raw!r}") from e
+    if train_subsample < 1:
+        raise ValueError(f"dataset.train_subsample must be >= 1, got {train_subsample}")
+
+    dataset_cfg["train_subsample"] = train_subsample
+
+
 def merge_weights_from(model_base: YOLO, merge_from: str) -> None:
     """
     Merge weights from `merge_from` into `model_base` (best-effort).
@@ -557,6 +579,7 @@ def main() -> None:
 
     dataset_cfg = cfg["dataset"].copy()
     _normalize_val_subsample(dataset_cfg)
+    _normalize_train_subsample(dataset_cfg)
     # If dataset has a path to a dir, merge in attributes/attr_nc/attr_label_format from dataset.yaml there (v10 format)
     path = dataset_cfg.get("path")
     if path and Path(path).is_dir():
@@ -752,6 +775,19 @@ def main() -> None:
         exclude_patterns = _get(train_cfg, "exclude_patterns", None)
         if exclude_patterns:
             train_kwargs["qat_exclude"] = [str(p) for p in exclude_patterns]
+        # Calibration knobs — yaml keys are unprefixed (calib_*), trainer args are qat_calib_*.
+        calib_samples = _get(train_cfg, "calib_samples", None)
+        if calib_samples is not None:
+            train_kwargs["qat_calib_samples"] = int(calib_samples)
+        calib_method = _get(train_cfg, "calib_method", None)
+        if calib_method is not None:
+            train_kwargs["qat_calib_method"] = str(calib_method)
+        calib_percentile = _get(train_cfg, "calib_percentile", None)
+        if calib_percentile is not None:
+            train_kwargs["qat_calib_percentile"] = float(calib_percentile)
+        calib_data = _get(train_cfg, "calib_data", None)
+        if calib_data is not None:
+            train_kwargs["qat_calib_data"] = str(calib_data)
     else:
         if "int8" in train_cfg:
             train_kwargs["int8"] = bool(train_cfg["int8"])
