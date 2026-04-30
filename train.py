@@ -773,6 +773,7 @@ def main() -> None:
         if "compile" not in train_cfg:
             train_kwargs["compile"] = False
         train_kwargs["cos_lr"] = bool(_get(train_cfg, "cos_lr", True))
+        train_kwargs["qat_freeze_bn"] = bool(_get(train_cfg, "qat_freeze_bn", True))
         # Optional list of glob-substring patterns matching module names where Q/DQ
         # should NOT be inserted (e.g. ["model.23"] for the detection head, matching
         # the FP16-pinned region in quant/make_int8.py). DFL exclusion is structural
